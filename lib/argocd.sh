@@ -343,6 +343,21 @@ apply_app_of_apps() {
     local cluster_type="kind"
     is_kind_cluster || cluster_type="external"
 
+    # Generar parámetros Helm para repos ARC
+    local arc_params=""
+    local repo_count
+    repo_count=$(echo "$CFG_ARC_REPOS" | jq 'length')
+    for ((i=0; i<repo_count; i++)); do
+        local name url
+        name=$(echo "$CFG_ARC_REPOS" | jq -r ".[$i].name")
+        url=$(echo "$CFG_ARC_REPOS" | jq -r ".[$i].url")
+        arc_params="${arc_params}        - name: arc.repos[${i}].name
+          value: \"${name}\"
+        - name: arc.repos[${i}].url
+          value: \"${url}\"
+"
+    done
+
     local app_file="${CFG_DATA_DIR}/app-of-apps.yaml"
     render_template \
         "${AUTOKUBE_ROOT}/manifests/argocd/app-of-apps.yaml.tpl" \
@@ -350,7 +365,8 @@ apply_app_of_apps() {
         "GITOPS_REPO_URL" "$CFG_GITOPS_REPO_URL" \
         "GITOPS_TARGET_REVISION" "$CFG_GITOPS_TARGET_REVISION" \
         "GITOPS_PATH" "$CFG_GITOPS_PATH" \
-        "CLUSTER_TYPE" "$cluster_type"
+        "CLUSTER_TYPE" "$cluster_type" \
+        "ARC_REPOS_PARAMS" "$arc_params"
 
     kubectl apply -f "$app_file"
 

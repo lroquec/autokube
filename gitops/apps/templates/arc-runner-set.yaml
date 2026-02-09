@@ -1,7 +1,9 @@
+{{- range .Values.arc.repos }}
+---
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: arc-runner-set
+  name: arc-runner-{{ .name }}
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "2"
@@ -16,8 +18,11 @@ spec:
       helm:
         valueFiles:
           - $values/gitops/components/arc-runner-set/values.yaml
-    - repoURL: {{ .Values.global.repoURL | quote }}
-      targetRevision: {{ .Values.global.targetRevision | quote }}
+        parameters:
+          - name: githubConfigUrl
+            value: {{ .url | quote }}
+    - repoURL: {{ $.Values.global.repoURL | quote }}
+      targetRevision: {{ $.Values.global.targetRevision | quote }}
       ref: values
   destination:
     server: https://kubernetes.default.svc
@@ -29,3 +34,4 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+{{- end }}

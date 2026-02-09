@@ -48,6 +48,16 @@ components:
     enabled: true
   kyverno:
     enabled: true
+  arc:
+    # Self-hosted runners de GitHub Actions en el cluster.
+    # Requiere un PAT de GitHub almacenado en Vault (ver README).
+    # Lista de repos para los que se crean runners (máx. 4, nivel de repo).
+    repos: []
+    # repos:
+    #   - name: mi-repo
+    #     url: "https://github.com/mi-org/mi-repo"
+    #   - name: otro-repo
+    #     url: "https://github.com/mi-org/otro-repo"
   metallb:
     # LoadBalancer para clusters sin cloud provider (bare-metal/VMs).
     # No es necesario en Kind (usa NodePort).

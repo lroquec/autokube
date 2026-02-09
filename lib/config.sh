@@ -23,6 +23,7 @@ CFG_COMP_KGATEWAY="true"
 CFG_COMP_SONARQUBE="true"
 CFG_COMP_KYVERNO="true"
 CFG_COMP_METALLB="false"
+CFG_ARC_REPOS=""
 CFG_CLUSTER_CREATE="true"
 CFG_CLUSTER_CONTEXT=""
 CFG_METALLB_ADDRESS_RANGE=""
@@ -69,6 +70,9 @@ load_config() {
         CFG_CLUSTER_CREATE=$(cfg_read '.cluster.create' "$CFG_CLUSTER_CREATE")
         CFG_CLUSTER_CONTEXT=$(cfg_read '.cluster.context' "$CFG_CLUSTER_CONTEXT")
         CFG_METALLB_ADDRESS_RANGE=$(cfg_read '.components.metallb.addressRange' "$CFG_METALLB_ADDRESS_RANGE")
+
+        # Leer lista de repos ARC como JSON array
+        CFG_ARC_REPOS=$(yq eval -o=json '.components.arc.repos // []' "$AUTOKUBE_CONFIG" 2>/dev/null || echo "[]")
 
         local data_dir
         data_dir=$(cfg_read '.persistence.dataDir' "./data")

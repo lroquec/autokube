@@ -2,3 +2,10 @@ global:
   repoURL: ""
   targetRevision: "main"
   clusterType: "kind"
+
+arc:
+  repos: []
+  # - name: devops-autokube
+  #   url: "https://github.com/Minsait-GA/devops-autokube"
+  # - name: otro-repo
+  #   url: "https://github.com/Minsait-GA/otro-repo"
