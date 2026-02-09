@@ -17,3 +17,6 @@ autokube.yaml
 .idea/
 .vscode/
 *.code-workspace
+
+# Claude
+.claude/
