@@ -9,7 +9,7 @@ Instalador de entorno Kubernetes local para desarrollo. Un solo comando desplieg
 ## Arquitectura
 
 ```
-Host (Mac/Linux)
+Host (Mac/Linux/WSL2)
   ├── ./autokube up/down/destroy/status
   ├── config: autokube.yaml
   ├── data/ (persistente, montado en Kind via extraMounts)
@@ -26,8 +26,8 @@ Host (Mac/Linux)
 
 ## Requisitos previos
 
-- **Docker** (Docker Desktop en Mac, dockerd en Linux) — debe estar ejecutándose
-- **macOS** (Intel/Apple Silicon) o **Linux** (amd64/arm64)
+- **Docker** (Docker Desktop en Mac/Windows, dockerd en Linux) — debe estar ejecutándose
+- **macOS** (Intel/Apple Silicon), **Linux** (amd64/arm64) o **Windows** (vía WSL2)
 - Puertos **80** y **443** disponibles en el host (configurables)
 
 El resto de dependencias se instalan automáticamente:
@@ -367,6 +367,57 @@ autokube/
 └── .gitignore
 ```
 
+## Windows (WSL2)
+
+Autokube funciona en Windows a través de WSL2, que proporciona un entorno Linux completo.
+
+### Requisitos
+
+1. **WSL2** instalado y configurado (no WSL1)
+2. **Docker Desktop** con el backend WSL2 activado (Settings → General → Use the WSL 2 based engine), y la integración habilitada para tu distribución (Settings → Resources → WSL Integration)
+
+### Instalación
+
+```bash
+# Dentro de WSL (importante: clonar en el filesystem de WSL, NO en /mnt/c/)
+git clone <repo-url> ~/projects/autokube
+cd ~/projects/autokube
+cp autokube.yaml.example autokube.yaml
+./autokube up
+```
+
+> **Rendimiento**: Clona siempre dentro del filesystem de WSL (`~/`, `/home/...`). Usar `/mnt/c/` (el disco de Windows montado) es extremadamente lento para operaciones de I/O.
+
+### Acceso desde el navegador de Windows
+
+Las URLs funcionan directamente desde el navegador de Windows porque WSL2 reenvía `localhost` automáticamente:
+
+- `https://argocd.127.0.0.1.nip.io`
+- `https://vault.127.0.0.1.nip.io`
+- `https://sonarqube.127.0.0.1.nip.io`
+
+### Certificados SSL en Windows
+
+El comando `./autokube trust-ca` instala la CA solo en el trust store de Linux (WSL). Para evitar avisos de certificado en el navegador de Windows, importa la CA manualmente:
+
+1. Copia el certificado al disco de Windows:
+   ```bash
+   cp data/ssl/ca.crt /mnt/c/Users/<tu-usuario>/Desktop/autokube-ca.crt
+   ```
+2. En Windows, haz doble clic en `autokube-ca.crt` → **Instalar certificado**
+3. Selecciona **Máquina local** → **Colocar todos los certificados en el siguiente almacén** → **Entidades de certificación raíz de confianza**
+4. Reinicia el navegador
+
+### Diferencias con Mac/Linux nativo
+
+| Aspecto | Mac/Linux | WSL2 |
+|---|---|---|
+| Docker | Docker Desktop / dockerd | Docker Desktop con backend WSL2 |
+| Dependencias | brew (Mac) / binarios (Linux) | Binarios en `~/.local/bin` (igual que Linux) |
+| Trust CA | Keychain (Mac) / update-ca-trust (Linux) | Solo Linux dentro de WSL; en Windows, importar manualmente |
+| Puertos | Directos en el host | WSL2 reenvía localhost a Windows automáticamente |
+| Rendimiento I/O | Nativo | Nativo en filesystem WSL; muy lento en `/mnt/c/` |
+
 ## Troubleshooting
 
 ### Puerto 80/443 ocupado
@@ -421,6 +472,10 @@ Esto instala la CA en el trust store del sistema. En Mac usa el Keychain; en Lin
 ./autokube up
 # Vault se inicializa con los datos existentes, solo necesita unseal
 ```
+
+### WSL2: Docker no accesible
+
+Si `docker info` falla dentro de WSL, asegúrate de que Docker Desktop está ejecutándose en Windows y que la integración WSL está habilitada para tu distribución en Settings → Resources → WSL Integration.
 
 ### ArgoCD apps en OutOfSync
 
