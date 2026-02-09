@@ -2,3 +2,6 @@ githubConfigUrl: "https://github.com/Minsait-GA"
 githubConfigSecret: github-arc-secret
 minRunners: 0
 maxRunners: 3
+controllerServiceAccount:
+  name: arc-gha-rs-controller
+  namespace: arc-systems
