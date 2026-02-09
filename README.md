@@ -1,12 +1,14 @@
 # Autokube
 
-Instalador de entorno Kubernetes local para desarrollo. Un solo comando despliega un cluster [Kind](https://kind.sigs.k8s.io/) con todo lo necesario: ArgoCD, Vault, External Secrets, kgateway, SonarQube y Kyverno. Todo accesible vía HTTPS con certificados autofirmados.
+Instalador de entorno Kubernetes para desarrollo. Un solo comando despliega un cluster [Kind](https://kind.sigs.k8s.io/) con todo lo necesario: ArgoCD, Vault, External Secrets, kgateway, SonarQube y Kyverno. Todo accesible vía HTTPS con certificados autofirmados. También soporta desplegar en un **cluster Kubernetes existente** (externo).
 
 ```
 ./autokube up
 ```
 
 ## Arquitectura
+
+### Kind (por defecto)
 
 ```
 Host (Mac/Linux/WSL2)
@@ -24,11 +26,21 @@ Host (Mac/Linux/WSL2)
         └── Kyverno (policy engine, políticas en modo Audit)
 ```
 
+### Cluster externo (`cluster.create: false`)
+
+```
+Cluster Kubernetes existente
+  ├── kgateway (LoadBalancer, con MetalLB opcional para bare-metal)
+  ├── ArgoCD, Vault (PVC), ESO, SonarQube, Kyverno
+  └── Misma configuración, sin dependencia de Docker/Kind
+```
+
 ## Requisitos previos
 
-- **Docker** (Docker Desktop en Mac/Windows, dockerd en Linux) — debe estar ejecutándose
+- **Docker** (Docker Desktop en Mac/Windows, dockerd en Linux) — solo para clusters Kind
 - **macOS** (Intel/Apple Silicon), **Linux** (amd64/arm64) o **Windows** (vía WSL2)
-- Puertos **80** y **443** disponibles en el host (configurables)
+- Puertos **80** y **443** disponibles en el host (configurables, solo Kind)
+- Para cluster externo: acceso vía `kubeconfig` al cluster destino
 
 El resto de dependencias se instalan automáticamente:
 
@@ -90,6 +102,8 @@ Copia `autokube.yaml.example` a `autokube.yaml` y personaliza. Si no existe, se 
 ```yaml
 cluster:
   name: autokube                    # Nombre del cluster Kind
+  create: true                      # false = usar cluster Kubernetes existente
+  context: ""                       # Contexto kubeconfig (solo si create: false, vacío = actual)
 
 network:
   baseDomain: "127.0.0.1.nip.io"   # Dominio base (usa nip.io para DNS automático)
@@ -119,10 +133,40 @@ components:                         # Habilitar/deshabilitar componentes individ
     enabled: true
   kyverno:
     enabled: true
+  metallb:
+    enabled: false                  # LoadBalancer para clusters bare-metal (no necesario en Kind)
+    addressRange: ""                # Rango de IPs, ej: "192.168.1.240-192.168.1.250"
 
 persistence:
   dataDir: "./data"                 # Directorio de datos persistentes
 ```
+
+### Cluster externo
+
+Para instalar los componentes en un cluster Kubernetes existente (no Kind):
+
+```yaml
+cluster:
+  create: false         # No crear Kind
+  context: "mi-cluster" # Contexto kubeconfig (vacío = contexto actual)
+
+components:
+  metallb:
+    enabled: true                         # Necesario en bare-metal para LoadBalancer
+    addressRange: "192.168.1.240-192.168.1.250"
+```
+
+Diferencias respecto a Kind:
+
+| Aspecto | Kind | Cluster externo |
+|---|---|---|
+| kgateway Service | NodePort (31080/31443) | LoadBalancer |
+| Vault storage | hostPath (extraMounts) | PVC con StorageClass |
+| SonarQube initSysctl | privileged container | Deshabilitado (el admin configura sysctl) |
+| Docker/Kind | Requerido | No necesario |
+| `./autokube down` | Para el container Docker | No aplica (no gestiona el cluster) |
+| `./autokube destroy` | Elimina cluster Kind | Desinstala componentes (helm uninstall) |
+| MetalLB | No necesario | Opcional para bare-metal |
 
 ### Modos de instalación
 
@@ -156,20 +200,27 @@ export AUTOKUBE_GITOPS_TOKEN="ghp_xxxxx"
 | kgateway | `kgateway` (OCI) | v2.2.0 | `oci://cr.kgateway.dev/kgateway-dev/charts` |
 | SonarQube | `sonarqube/sonarqube` | 2026.1.0 | `https://SonarSource.github.io/helm-chart-sonarqube` |
 | Kyverno | `kyverno/kyverno` | 3.7.0 | `https://kyverno.github.io/kyverno/` |
+| MetalLB | `metallb/metallb` | 0.14.9 | `https://metallb.github.io/metallb` |
 | Gateway API CRDs | — | v1.4.1 | kubernetes-sigs/gateway-api |
 
 ### kgateway (Solo.io)
 
-Gateway API nativo que actúa como ingress controller. Usa un Service tipo NodePort con puertos fijos mapeados al host a través de Kind, lo que funciona tanto en Mac (Docker Desktop) como en Linux sin necesidad de MetalLB.
+Gateway API nativo que actúa como ingress controller.
 
-| Puerto | Flujo |
+- **Kind**: Service tipo NodePort con puertos fijos mapeados al host a través de Kind
+- **Cluster externo**: Service tipo LoadBalancer (MetalLB opcional para bare-metal)
+
+| Puerto (Kind) | Flujo |
 |---|---|
 | Host 80 → Kind node 31080 → kgateway 8080 | HTTP |
 | Host 443 → Kind node 31443 → kgateway 8443 | HTTPS (TLS termination) |
 
 ### Vault (HashiCorp)
 
-Desplegado en modo producción standalone con almacenamiento Raft. Los datos persisten en el host mediante extraMounts de Kind (`data/vault/raft` → `/vault/data`).
+Desplegado en modo producción standalone con almacenamiento Raft.
+
+- **Kind**: Los datos persisten en el host mediante extraMounts (`data/vault/raft` → `/vault/data`)
+- **Cluster externo**: Usa PVC con el StorageClass por defecto del cluster
 
 - **Init**: Primera ejecución genera 1 unseal key + root token, guardados en `data/vault/init.json`
 - **Unseal**: Automático en cada `./autokube up` posterior
@@ -205,7 +256,8 @@ Análisis estático de código. Incluye PostgreSQL embebido.
 
 - Credenciales por defecto: `admin` / `admin`
 - Requiere mínimo 2GB RAM para SonarQube + 512MB para PostgreSQL
-- `vm.max_map_count` se configura automáticamente en el nodo Kind
+- **Kind**: `vm.max_map_count` se configura automáticamente en el nodo via `docker exec`
+- **Cluster externo**: El init privileged se deshabilita; el admin debe configurar `vm.max_map_count >= 524288` en los nodos
 
 ### Kyverno
 
@@ -281,18 +333,28 @@ gitops/
 │       ├── kyverno.yaml           # Multi-source: Helm chart + values del repo
 │       ├── eso-config.yaml        # Single-source: manifests del repo
 │       ├── kyverno-policies.yaml  # Single-source: manifests del repo
-│       └── routes.yaml            # Single-source: manifests del repo
+│       ├── routes.yaml            # Single-source: manifests del repo
+│       ├── metallb.yaml           # Condicional: solo si clusterType=external
+│       └── metallb-config.yaml    # Condicional: solo si clusterType=external
 └── components/                    # Configuración de cada componente
-    ├── vault/values.yaml          # Helm values (sin prefijo de chart)
+    ├── vault/
+    │   ├── values.yaml            # Helm values para Kind (hostPath)
+    │   └── values-external.yaml   # Helm values para cluster externo (PVC)
     ├── kgateway/values.yaml
     ├── eso/values.yaml
-    ├── sonarqube/values.yaml
+    ├── sonarqube/
+    │   ├── values.yaml            # Helm values para Kind (privileged sysctl)
+    │   └── values-external.yaml   # Helm values para cluster externo
     ├── kyverno/values.yaml
+    ├── metallb/values.yaml        # Helm values para MetalLB
     ├── eso-config/                # ClusterSecretStore manifest
     │   └── cluster-secret-store.yaml
     ├── kyverno-policies/          # ClusterPolicy manifests
     │   ├── disallow-latest-tag.yaml
     │   └── require-resources.yaml
+    ├── metallb-config/            # IPAddressPool + L2Advertisement
+    │   ├── ipaddresspool.yaml
+    │   └── l2advertisement.yaml
     └── routes/                    # Gateway, HTTPRoutes, ReferenceGrants
         ├── gateway.yaml
         ├── httproute-argocd.yaml
@@ -305,12 +367,16 @@ gitops/
 
 Las Applications de Helm charts (vault, kgateway, eso, sonarqube, kyverno) usan **multi-source**: el chart se descarga del repositorio oficial de Helm y los values se leen del repo Git (via referencia `$values`). No hay Chart.yaml wrappers en los directorios de componentes.
 
+El valor `global.clusterType` (`kind` o `external`) controla qué values se usan (vault, sonarqube seleccionan `values.yaml` o `values-external.yaml`) y si las Applications de MetalLB se renderizan.
+
 ### Sync Waves
 
 ArgoCD despliega los componentes en orden mediante sync waves:
 
 | Wave | Componente | Razón |
 |---|---|---|
+| -4 | MetalLB (externo) | LoadBalancer debe existir antes que kgateway |
+| -3 | MetalLB Config (externo) | IPAddressPool tras CRDs de MetalLB |
 | -3 | kgateway | Infraestructura de red primero |
 | -3 | Vault | Debe existir antes de que ESO conecte |
 | -2 | Kyverno | Policy engine independiente |
@@ -326,7 +392,7 @@ En modo GitOps, ArgoCD gestiona los componentes pero hay acciones que siempre se
 
 - **Vault init/unseal**: Inicialización y desellado de Vault (no puede ser declarativo)
 - **Vault configuración**: KV v2, Kubernetes auth, policy y role para ESO
-- **Gateway NodePorts**: Parcheo del Service creado por el Gateway controller a NodePort 31080/31443
+- **Gateway NodePorts** (solo Kind): Parcheo del Service creado por el Gateway controller a NodePort 31080/31443
 
 ## Estructura del proyecto
 
@@ -347,7 +413,9 @@ autokube/
 │   ├── kgateway.sh                 # Install kgateway + Gateway + HTTPRoutes
 │   ├── sonarqube.sh                # Install SonarQube Community
 │   ├── kyverno.sh                  # Install Kyverno + políticas
-│   └── networking.sh               # TLS secrets, ReferenceGrants
+│   ├── networking.sh               # TLS secrets, ReferenceGrants
+│   ├── external.sh                 # Conexión cluster externo + desinstalación
+│   └── metallb.sh                  # Install MetalLB + IPAddressPool
 ├── manifests/                      # Templates y values para instalación imperativa
 │   ├── kind-cluster.yaml.tpl
 │   ├── argocd/
@@ -358,6 +426,12 @@ autokube/
 │   ├── kgateway/
 │   │   └── httproutes/
 │   ├── sonarqube/
+│   │   ├── values.yaml             # Kind: initSysctl privileged
+│   │   └── values-external.yaml    # Externo: sin privileged
+│   ├── vault/
+│   │   ├── values.yaml             # Kind: hostPath
+│   │   └── values-external.yaml    # Externo: PVC
+│   ├── metallb/                    # MetalLB values + IPAddressPool template
 │   └── kyverno/
 │       └── policies/
 ├── gitops/                         # Contenido para repo GitOps remoto
@@ -476,6 +550,26 @@ Esto instala la CA en el trust store del sistema. En Mac usa el Keychain; en Lin
 ### WSL2: Docker no accesible
 
 Si `docker info` falla dentro de WSL, asegúrate de que Docker Desktop está ejecutándose en Windows y que la integración WSL está habilitada para tu distribución en Settings → Resources → WSL Integration.
+
+### Cluster externo: kgateway sin IP externa
+
+Si kgateway queda con `<pending>` en EXTERNAL-IP, necesitas un LoadBalancer controller. Habilita MetalLB:
+
+```yaml
+components:
+  metallb:
+    enabled: true
+    addressRange: "192.168.1.240-192.168.1.250"  # IPs libres en tu red
+```
+
+### Cluster externo: SonarQube crashea con vm.max_map_count
+
+El admin del cluster debe configurar en cada nodo worker:
+
+```bash
+sudo sysctl -w vm.max_map_count=524288
+echo "vm.max_map_count=524288" | sudo tee -a /etc/sysctl.d/99-sonarqube.conf
+```
 
 ### ArgoCD apps en OutOfSync
 
