@@ -1,4 +1,5 @@
 githubConfigSecret: github-arc-secret
+runnerScaleSetName: arc-runner-set
 minRunners: 0
 maxRunners: 3
 controllerServiceAccount:
