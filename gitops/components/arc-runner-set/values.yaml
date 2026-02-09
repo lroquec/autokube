@@ -1,0 +1,4 @@
+githubConfigUrl: "https://github.com/Minsait-GA"
+githubConfigSecret: github-arc-secret
+minRunners: 0
+maxRunners: 3
