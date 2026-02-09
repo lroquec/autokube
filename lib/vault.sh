@@ -43,9 +43,14 @@ vault_post_install() {
         sleep 5
     done
 
-    # Determinar si necesitamos init o solo unseal
+    # vault status retorna exit code 1 (error), 2 (sealed) o 0 (ok).
+    # Capturamos stdout independientemente del exit code.
     local vault_status
-    vault_status=$(kubectl exec vault-0 -n "$VAULT_NAMESPACE" -- vault status -format=json 2>/dev/null || echo '{"initialized": false, "sealed": true}')
+    vault_status=$(kubectl exec vault-0 -n "$VAULT_NAMESPACE" -- vault status -format=json 2>/dev/null) || true
+
+    if [ -z "$vault_status" ]; then
+        vault_status='{"initialized": false, "sealed": true}'
+    fi
 
     local initialized
     initialized=$(echo "$vault_status" | jq -r '.initialized')
@@ -54,9 +59,13 @@ vault_post_install() {
         vault_init "$init_file"
     fi
 
-    # Unseal
+    # Re-check status tras posible init
+    vault_status=$(kubectl exec vault-0 -n "$VAULT_NAMESPACE" -- vault status -format=json 2>/dev/null) || true
+    if [ -z "$vault_status" ]; then
+        vault_status='{"sealed": true}'
+    fi
+
     local sealed
-    vault_status=$(kubectl exec vault-0 -n "$VAULT_NAMESPACE" -- vault status -format=json 2>/dev/null || echo '{"sealed": true}')
     sealed=$(echo "$vault_status" | jq -r '.sealed')
 
     if [ "$sealed" = "true" ]; then
@@ -66,7 +75,17 @@ vault_post_install() {
     fi
 
     # Esperar a que Vault esté Ready
-    retry 12 5 kubectl get pod vault-0 -n "$VAULT_NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True"
+    log_info "Esperando a que vault-0 esté Ready..."
+    local ready_timeout=$((SECONDS + 60))
+    while [ $SECONDS -lt $ready_timeout ]; do
+        local ready
+        ready=$(kubectl get pod vault-0 -n "$VAULT_NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+        if [ "$ready" = "True" ]; then
+            log_success "vault-0 está Ready"
+            break
+        fi
+        sleep 5
+    done
 
     # Configurar KV, K8s auth, policy y role
     vault_configure "$init_file"

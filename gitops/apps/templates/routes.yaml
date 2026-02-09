@@ -1,25 +1,24 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: sonarqube
+  name: routes
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-2"
+    argocd.argoproj.io/sync-wave: "1"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
-    repoURL: '{{.Values.global.repoURL}}'
-    targetRevision: '{{.Values.global.targetRevision}}'
-    path: components/sonarqube
+    repoURL: {{ .Values.global.repoURL | quote }}
+    targetRevision: {{ .Values.global.targetRevision | quote }}
+    path: components/routes
   destination:
     server: https://kubernetes.default.svc
-    namespace: sonarqube
+    namespace: kgateway-system
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=true
       - ServerSideApply=true

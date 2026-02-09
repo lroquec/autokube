@@ -25,13 +25,44 @@ install_kgateway() {
     log_success "kgateway instalado"
 }
 
+kgateway_patch_nodeports() {
+    log_step "Parcheando NodePorts del gateway..."
+
+    # Esperar a que el Gateway esté Accepted
+    log_info "Esperando a que el Gateway esté accepted..."
+    local gw_timeout=$((SECONDS + 180))
+    while [ $SECONDS -lt $gw_timeout ]; do
+        local accepted
+        accepted=$(kubectl get gateway main-gateway -n "$KGATEWAY_NAMESPACE" \
+            -o jsonpath='{.status.conditions[?(@.type=="Accepted")].status}' 2>/dev/null || echo "")
+        if [ "$accepted" = "True" ]; then
+            log_success "Gateway accepted"
+            break
+        fi
+        sleep 5
+    done
+
+    # Esperar a que el Service exista
+    log_info "Esperando Service del gateway..."
+    local svc_timeout=$((SECONDS + 60))
+    while [ $SECONDS -lt $svc_timeout ]; do
+        if kubectl get svc main-gateway -n "$KGATEWAY_NAMESPACE" &>/dev/null; then
+            break
+        fi
+        sleep 3
+    done
+
+    kubectl patch svc main-gateway -n "$KGATEWAY_NAMESPACE" --type='json' -p='[
+        {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 31080},
+        {"op": "replace", "path": "/spec/ports/1/nodePort", "value": 31443}
+    ]'
+    log_success "Gateway NodePorts fijados (31080/31443)"
+}
+
 kgateway_post_install() {
     log_step "Configurando kgateway Gateway y rutas..."
 
     ensure_namespace "$KGATEWAY_NAMESPACE"
-
-    # Aplicar GatewayParameters
-    kubectl apply -f "${AUTOKUBE_ROOT}/manifests/kgateway/gateway-params.yaml"
 
     # Aplicar Gateway
     local gateway_file="${CFG_DATA_DIR}/kgateway-gateway.yaml"
@@ -41,9 +72,8 @@ kgateway_post_install() {
         "BASE_DOMAIN" "$CFG_BASE_DOMAIN"
     kubectl apply -f "$gateway_file"
 
-    # Esperar a que el Gateway esté ready
-    log_info "Esperando a que el Gateway esté ready..."
-    retry 30 5 kubectl get gateway main-gateway -n "$KGATEWAY_NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Accepted")].status}' 2>/dev/null | grep -q "True"
+    # Parchear NodePorts
+    kgateway_patch_nodeports
 
     # Crear ReferenceGrants y HTTPRoutes para cada componente habilitado
     if component_enabled argocd; then

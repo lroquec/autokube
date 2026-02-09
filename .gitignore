@@ -4,6 +4,9 @@ data/
 # Generated configs
 autokube.yaml
 
+# Secrets
+.env
+
 # OS
 .DS_Store
 *.swp

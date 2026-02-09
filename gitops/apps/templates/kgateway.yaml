@@ -9,10 +9,16 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  source:
-    repoURL: '{{.Values.global.repoURL}}'
-    targetRevision: '{{.Values.global.targetRevision}}'
-    path: components/kgateway
+  sources:
+    - repoURL: oci://cr.kgateway.dev/kgateway-dev/charts
+      chart: kgateway
+      targetRevision: "v2.2.0"
+      helm:
+        valueFiles:
+          - $values/components/kgateway/values.yaml
+    - repoURL: {{ .Values.global.repoURL | quote }}
+      targetRevision: {{ .Values.global.targetRevision | quote }}
+      ref: values
   destination:
     server: https://kubernetes.default.svc
     namespace: kgateway-system

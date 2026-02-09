@@ -1,7 +1,10 @@
 # SonarQube Community Helm values
 # Chart: sonarqube/sonarqube
 
-edition: community
+community:
+  enabled: true
+
+monitoringPasscode: "autokube"
 
 service:
   type: ClusterIP

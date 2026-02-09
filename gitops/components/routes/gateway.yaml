@@ -3,8 +3,6 @@ kind: Gateway
 metadata:
   name: main-gateway
   namespace: kgateway-system
-  annotations:
-    gateway.kgateway.dev/parameters: kgateway-params
 spec:
   gatewayClassName: kgateway
   listeners:

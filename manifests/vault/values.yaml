@@ -24,12 +24,10 @@ server:
         path = "/vault/data"
       }
 
+  # Deshabilitamos el PVC del chart; usamos hostPath montado por Kind extraMounts
   dataStorage:
-    enabled: true
-    size: 1Gi
-    storageClass: null
+    enabled: false
 
-  # Usar hostPath montado por Kind
   volumes:
     - name: vault-data-host
       hostPath:

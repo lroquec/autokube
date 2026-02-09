@@ -65,22 +65,40 @@ cmd_up() {
         create_tls_secrets
     fi
 
-    # 7. Instalar componentes
-    if [ "$CFG_GITOPS_ENABLED" = "true" ] && [ "$CFG_COMP_ARGOCD" = "true" ]; then
-        # Modo GitOps: ArgoCD gestiona todo
+    # 7. Preparar nodo Kind (sysctl para SonarQube, Gateway API CRDs)
+    if component_enabled sonarqube; then
+        log_info "Configurando vm.max_map_count para SonarQube..."
+        docker exec "${CFG_CLUSTER_NAME}-control-plane" sysctl -w vm.max_map_count=524288 >/dev/null 2>&1 || true
+        docker exec "${CFG_CLUSTER_NAME}-control-plane" sysctl -w fs.file-max=131072 >/dev/null 2>&1 || true
+    fi
+    if component_enabled kgateway; then
+        install_gateway_api_crds
+    fi
+
+    # 8. Instalar ArgoCD (siempre imperativo, no puede gestionarse a sí mismo)
+    if component_enabled argocd; then
         install_argocd
+    fi
+
+    # 9. Instalar componentes
+    if [ "$CFG_GITOPS_ENABLED" = "true" ] && [ -n "$CFG_GITOPS_REPO_URL" ]; then
+        # Modo GitOps remoto: ArgoCD gestiona desde repo Git
         configure_argocd_repo
         apply_app_of_apps
-        wait_for_argocd_sync
+        wait_for_argocd_apps
+    elif component_enabled argocd; then
+        # Modo ArgoCD local: ArgoCD gestiona via Helm Applications
+        create_argocd_applications
+        wait_for_argocd_apps
     else
-        # Modo imperativo: instalar cada componente con Helm
+        # Sin ArgoCD: instalar imperativamente con Helm
         install_components_imperative
     fi
 
-    # 8. Post-install (siempre imperativo)
+    # 10. Post-install (siempre imperativo)
     post_install
 
-    # 9. Resumen
+    # 11. Resumen
     print_summary
 }
 
@@ -106,33 +124,35 @@ install_components_imperative() {
     if component_enabled kyverno; then
         install_kyverno
     fi
-
-    if component_enabled argocd; then
-        install_argocd
-    fi
 }
 
 post_install() {
     log_header "Post-instalación"
 
-    # Vault: init/unseal + configurar
+    # Vault: init/unseal + configurar (siempre imperativo)
     if component_enabled vault; then
         vault_post_install
     fi
 
-    # ESO: ClusterSecretStore
-    if component_enabled eso && component_enabled vault; then
-        eso_post_install
-    fi
+    # En modo GitOps remoto, ArgoCD gestiona routes, eso-config y kyverno-policies
+    if [ "$CFG_GITOPS_ENABLED" = "true" ] && [ -n "$CFG_GITOPS_REPO_URL" ]; then
+        # Solo parchear NodePorts (el Gateway y rutas los gestiona ArgoCD)
+        if component_enabled kgateway; then
+            kgateway_patch_nodeports
+        fi
+    else
+        # Modo imperativo o ArgoCD local: aplicar todo manualmente
+        if component_enabled eso && component_enabled vault; then
+            eso_post_install
+        fi
 
-    # kgateway: Gateway + HTTPRoutes
-    if component_enabled kgateway; then
-        kgateway_post_install
-    fi
+        if component_enabled kgateway; then
+            kgateway_post_install
+        fi
 
-    # Kyverno: policies
-    if component_enabled kyverno; then
-        kyverno_post_install
+        if component_enabled kyverno; then
+            kyverno_post_install
+        fi
     fi
 }
 

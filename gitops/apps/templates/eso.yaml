@@ -9,10 +9,16 @@ metadata:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  source:
-    repoURL: '{{.Values.global.repoURL}}'
-    targetRevision: '{{.Values.global.targetRevision}}'
-    path: components/eso
+  sources:
+    - repoURL: https://charts.external-secrets.io
+      chart: external-secrets
+      targetRevision: "0.15.1"
+      helm:
+        valueFiles:
+          - $values/components/eso/values.yaml
+    - repoURL: {{ .Values.global.repoURL | quote }}
+      targetRevision: {{ .Values.global.targetRevision | quote }}
+      ref: values
   destination:
     server: https://kubernetes.default.svc
     namespace: external-secrets

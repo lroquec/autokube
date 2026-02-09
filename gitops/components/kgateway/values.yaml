@@ -1,2 +1,2 @@
 # kgateway values for GitOps deployment
-kgateway: {}
+# No custom values needed - defaults are fine

@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: eso-config
+  name: kyverno-policies
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
@@ -10,12 +10,12 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: '{{.Values.global.repoURL}}'
-    targetRevision: '{{.Values.global.targetRevision}}'
-    path: components/eso-config
+    repoURL: {{ .Values.global.repoURL | quote }}
+    targetRevision: {{ .Values.global.targetRevision | quote }}
+    path: components/kyverno-policies
   destination:
     server: https://kubernetes.default.svc
-    namespace: external-secrets
+    namespace: kyverno
   syncPolicy:
     automated:
       prune: true

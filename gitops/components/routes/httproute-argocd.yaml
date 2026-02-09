@@ -12,6 +12,6 @@ spec:
     - "argocd.127.0.0.1.nip.io"
   rules:
     - backendRefs:
-        - name: argocd-server
+        - name: argo-cd-argocd-server
           namespace: argocd
           port: 80

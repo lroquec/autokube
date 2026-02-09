@@ -12,6 +12,6 @@ spec:
     - "argocd.__BASE_DOMAIN__"
   rules:
     - backendRefs:
-        - name: argocd-server
+        - name: argo-cd-argocd-server
           namespace: argocd
           port: 80

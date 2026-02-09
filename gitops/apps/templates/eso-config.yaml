@@ -1,21 +1,21 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: routes
+  name: eso-config
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-wave: "0"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   source:
-    repoURL: '{{.Values.global.repoURL}}'
-    targetRevision: '{{.Values.global.targetRevision}}'
-    path: components/routes
+    repoURL: {{ .Values.global.repoURL | quote }}
+    targetRevision: {{ .Values.global.targetRevision | quote }}
+    path: components/eso-config
   destination:
     server: https://kubernetes.default.svc
-    namespace: kgateway-system
+    namespace: external-secrets
   syncPolicy:
     automated:
       prune: true

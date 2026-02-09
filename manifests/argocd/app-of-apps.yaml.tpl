@@ -11,6 +11,12 @@ spec:
     repoURL: __GITOPS_REPO_URL__
     targetRevision: __GITOPS_TARGET_REVISION__
     path: __GITOPS_PATH__
+    helm:
+      parameters:
+        - name: global.repoURL
+          value: __GITOPS_REPO_URL__
+        - name: global.targetRevision
+          value: __GITOPS_TARGET_REVISION__
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
