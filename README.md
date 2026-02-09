@@ -201,6 +201,8 @@ export AUTOKUBE_GITOPS_TOKEN="ghp_xxxxx"
 | SonarQube | `sonarqube/sonarqube` | 2026.1.0 | `https://SonarSource.github.io/helm-chart-sonarqube` |
 | Kyverno | `kyverno/kyverno` | 3.7.0 | `https://kyverno.github.io/kyverno/` |
 | MetalLB | `metallb/metallb` | 0.14.9 | `https://metallb.github.io/metallb` |
+| ARC Controller | `gha-runner-scale-set-controller` | 0.13.1 | `ghcr.io/actions/actions-runner-controller-charts` |
+| ARC Runner Set | `gha-runner-scale-set` | 0.13.1 | `ghcr.io/actions/actions-runner-controller-charts` |
 | Gateway API CRDs | — | v1.4.1 | kubernetes-sigs/gateway-api |
 
 ### kgateway (Solo.io)
@@ -268,6 +270,47 @@ Policy engine para Kubernetes. Se despliega con dos políticas en **modo Audit**
 | `disallow-latest-tag` | Avisa si una imagen usa el tag `:latest` |
 | `require-resources` | Avisa si un container no tiene `resources.requests` y `resources.limits` |
 
+### GitHub Actions Runner Controller (ARC)
+
+Self-hosted runners de GitHub Actions desplegados en el cluster. ARC escala automáticamente los runners según demanda.
+
+- **Controlador** (`arc-systems`): gestiona el ciclo de vida de los runners
+- **Runner Scale Set** (`arc-runners`): crea pods runner cuando hay jobs pendientes
+- `minRunners: 0` — no consume recursos cuando no hay jobs
+- `maxRunners: 3` — límite de runners concurrentes
+
+#### Requisito previo: PAT de GitHub en Vault
+
+ARC necesita un Personal Access Token (PAT) de GitHub almacenado en Vault. Sin este paso, el componente `arc-runner-set` no podrá autenticarse con GitHub.
+
+1. Crear un PAT clásico en GitHub: **Settings > Developer settings > Personal access tokens > Tokens (classic)** con scope `repo`
+   - Para nivel de organización, usar un PAT con permiso **Organization: Self-hosted runners (Read & Write)**
+
+2. Guardar el PAT en Vault:
+   ```bash
+   # Obtener la dirección de Vault y el token
+   export VAULT_ADDR=https://vault.127.0.0.1.nip.io
+   export VAULT_TOKEN=$(jq -r '.root_token' data/vault/init.json)
+
+   # Guardar el PAT
+   vault kv put kv/github-arc pat="ghp_tu_token_aqui"
+   ```
+
+3. Verificar que se ha guardado correctamente:
+   ```bash
+   vault kv get kv/github-arc
+   ```
+
+El ExternalSecret (`arc-config`) sincroniza automáticamente este secreto de Vault al Secret de Kubernetes `github-arc-secret` que usa ARC.
+
+#### Uso en workflows
+
+```yaml
+jobs:
+  build:
+    runs-on: arc-runner-set
+```
+
 ### ArgoCD
 
 Plataforma GitOps para despliegue declarativo. Se instala siempre de forma imperativa (no puede gestionarse a sí mismo en bootstrap).
@@ -334,6 +377,9 @@ gitops/
 │       ├── eso-config.yaml        # Single-source: manifests del repo
 │       ├── kyverno-policies.yaml  # Single-source: manifests del repo
 │       ├── routes.yaml            # Single-source: manifests del repo
+│       ├── arc.yaml               # ARC controller (Helm chart OCI)
+│       ├── arc-runner-set.yaml    # Multi-source: Helm chart + values del repo
+│       ├── arc-config.yaml        # Single-source: ExternalSecret para PAT
 │       ├── metallb.yaml           # Condicional: solo si clusterType=external
 │       └── metallb-config.yaml    # Condicional: solo si clusterType=external
 └── components/                    # Configuración de cada componente
@@ -346,6 +392,9 @@ gitops/
     │   ├── values.yaml            # Helm values para Kind (privileged sysctl)
     │   └── values-external.yaml   # Helm values para cluster externo
     ├── kyverno/values.yaml
+    ├── arc-runner-set/values.yaml  # Config runner set (org URL, scaling)
+    ├── arc-config/                # ExternalSecret para PAT de GitHub
+    │   └── external-secret.yaml
     ├── metallb/values.yaml        # Helm values para MetalLB
     ├── eso-config/                # ClusterSecretStore manifest
     │   └── cluster-secret-store.yaml
@@ -384,7 +433,10 @@ ArgoCD despliega los componentes en orden mediante sync waves:
 | -1 | External Secrets | CRDs y operator antes del ClusterSecretStore |
 | 0 | ESO Config | Depende de Vault + ESO CRDs |
 | 0 | Kyverno Policies | Depende de Kyverno CRDs |
+| 1 | ARC Controller | Independiente, no crítico para el cluster |
 | 1 | Routes | Depende de kgateway ready |
+| 2 | ARC Runner Set | Depende del controlador ARC |
+| 2 | ARC Config | ExternalSecret para PAT de GitHub |
 
 ### Post-instalación
 
