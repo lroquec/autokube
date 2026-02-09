@@ -37,10 +37,10 @@ El resto de dependencias se instalan automáticamente:
 | kind | v0.31.0 | `brew install` | Binario en `~/.local/bin` |
 | kubectl | latest stable | `brew install` | Binario en `~/.local/bin` |
 | helm | latest stable | `brew install` | Script oficial |
-| yq | v4.52.1 | `brew install` | Binario en `~/.local/bin` |
-| jq | 1.8 | `brew install` | Binario en `~/.local/bin` |
-| vault CLI | 1.19.2 | `brew install hashicorp/tap/vault` | Zip desde releases |
-| argocd CLI | v2.14.11 | `brew install` | Binario en `~/.local/bin` |
+| yq | v4.52.x | `brew install` | Binario en `~/.local/bin` |
+| jq | 1.7+ | `brew install` | Binario en `~/.local/bin` |
+| vault CLI | 1.19+ | `brew install hashicorp/tap/vault` | Zip desde releases |
+| argocd CLI | v3.3+ | `brew install` | Binario en `~/.local/bin` |
 
 ## Inicio rápido
 
@@ -50,6 +50,7 @@ git clone <repo-url> && cd autokube
 
 # 2. (Opcional) Personalizar configuración
 cp autokube.yaml.example autokube.yaml
+# Editar autokube.yaml según necesidades
 
 # 3. Levantar todo
 ./autokube up
@@ -100,10 +101,10 @@ ssl:
   trustCA: false                    # Instalar CA en trust store del sistema (requiere sudo)
 
 gitops:
-  enabled: true                     # Usar ArgoCD para gestionar componentes
+  enabled: true                     # Usar ArgoCD para gestionar componentes desde repo remoto
   repoURL: ""                       # URL del repo Git (REQUERIDO si gitops.enabled)
   targetRevision: "main"            # Branch o tag
-  path: "apps"                      # Path a las Application CRs en el repo
+  path: "gitops/apps"              # Path al Helm chart app-of-apps en el repo
 
 components:                         # Habilitar/deshabilitar componentes individualmente
   argocd:
@@ -125,9 +126,23 @@ persistence:
 
 ### Modos de instalación
 
-**Modo imperativo** (por defecto si `gitops.repoURL` está vacío): cada componente se instala directamente con Helm.
+| Modo | Condición | Descripción |
+|---|---|---|
+| **GitOps remoto** | `gitops.enabled: true` + `gitops.repoURL` configurado | ArgoCD gestiona todos los componentes desde el repo Git remoto mediante app-of-apps |
+| **ArgoCD local** | `argocd.enabled: true` + `gitops.repoURL` vacío | ArgoCD gestiona componentes con Applications inline (valores desde ficheros locales) |
+| **Imperativo** | `argocd.enabled: false` | Cada componente se instala directamente con Helm |
 
-**Modo GitOps** (cuando `gitops.enabled: true` y `gitops.repoURL` configurado): ArgoCD se instala imperativamente y gestiona el resto de componentes desde el repositorio Git remoto mediante app-of-apps.
+En todos los modos, ArgoCD se instala siempre de forma imperativa (no puede gestionarse a sí mismo en bootstrap).
+
+### Autenticación para repositorios privados
+
+Si `gitops.repoURL` apunta a un repo privado HTTPS, autokube extrae las credenciales automáticamente de `~/.git-credentials`. También acepta variables de entorno:
+
+```bash
+export AUTOKUBE_GITOPS_USERNAME="tu-usuario"
+export AUTOKUBE_GITOPS_TOKEN="ghp_xxxxx"
+./autokube up
+```
 
 ## Componentes
 
@@ -154,7 +169,7 @@ Gateway API nativo que actúa como ingress controller. Usa un Service tipo NodeP
 
 ### Vault (HashiCorp)
 
-Desplegado en modo producción standalone con almacenamiento Raft. Los datos persisten en el host mediante extraMounts de Kind.
+Desplegado en modo producción standalone con almacenamiento Raft. Los datos persisten en el host mediante extraMounts de Kind (`data/vault/raft` → `/vault/data`).
 
 - **Init**: Primera ejecución genera 1 unseal key + root token, guardados en `data/vault/init.json`
 - **Unseal**: Automático en cada `./autokube up` posterior
@@ -206,7 +221,7 @@ Policy engine para Kubernetes. Se despliega con dos políticas en **modo Audit**
 Plataforma GitOps para despliegue declarativo. Se instala siempre de forma imperativa (no puede gestionarse a sí mismo en bootstrap).
 
 - Modo insecure (TLS terminado en kgateway)
-- Password de admin mostrado en `./autokube status`
+- Password de admin mostrado en `./autokube status` y en `./autokube up`
 
 ## Networking
 
@@ -249,30 +264,46 @@ Los datos persisten gracias a los `extraMounts` de Kind, que mapean directorios 
 
 ## GitOps
 
-### Estructura del repositorio remoto
+### Estructura del directorio gitops/
 
-El directorio `gitops/` contiene la estructura que debe existir en el repositorio Git remoto configurado en `gitops.repoURL`:
+El directorio `gitops/` contiene toda la configuración que ArgoCD usa en modo GitOps remoto. Debe existir en el repositorio Git configurado en `gitops.repoURL`.
 
 ```
 gitops/
-├── apps/                          # ArgoCD Application CRs (app-of-apps)
-│   ├── kgateway.yaml
-│   ├── vault.yaml
-│   ├── eso.yaml
-│   ├── eso-config.yaml
-│   ├── sonarqube.yaml
-│   ├── kyverno.yaml
-│   └── routes.yaml
+├── apps/                          # Helm chart app-of-apps (ArgoCD lo renderiza)
+│   ├── Chart.yaml                 # Metadatos del chart
+│   ├── values.yaml                # Valores por defecto (repoURL, targetRevision)
+│   └── templates/                 # Application CRs como templates Helm
+│       ├── vault.yaml             # Multi-source: Helm chart + values del repo
+│       ├── kgateway.yaml          # Multi-source: OCI chart + values del repo
+│       ├── eso.yaml               # Multi-source: Helm chart + values del repo
+│       ├── sonarqube.yaml         # Multi-source: Helm chart + values del repo
+│       ├── kyverno.yaml           # Multi-source: Helm chart + values del repo
+│       ├── eso-config.yaml        # Single-source: manifests del repo
+│       ├── kyverno-policies.yaml  # Single-source: manifests del repo
+│       └── routes.yaml            # Single-source: manifests del repo
 └── components/                    # Configuración de cada componente
-    ├── vault/                     # Chart.yaml + values.yaml
-    ├── kgateway/                  # Chart.yaml + values.yaml
-    ├── eso/                       # Chart.yaml + values.yaml
+    ├── vault/values.yaml          # Helm values (sin prefijo de chart)
+    ├── kgateway/values.yaml
+    ├── eso/values.yaml
+    ├── sonarqube/values.yaml
+    ├── kyverno/values.yaml
     ├── eso-config/                # ClusterSecretStore manifest
-    ├── sonarqube/                 # Chart.yaml + values.yaml
-    ├── kyverno/                   # Chart.yaml + values.yaml
+    │   └── cluster-secret-store.yaml
     ├── kyverno-policies/          # ClusterPolicy manifests
+    │   ├── disallow-latest-tag.yaml
+    │   └── require-resources.yaml
     └── routes/                    # Gateway, HTTPRoutes, ReferenceGrants
+        ├── gateway.yaml
+        ├── httproute-argocd.yaml
+        ├── httproute-vault.yaml
+        ├── httproute-sonarqube.yaml
+        ├── referencegrant-argocd.yaml
+        ├── referencegrant-vault.yaml
+        └── referencegrant-sonarqube.yaml
 ```
+
+Las Applications de Helm charts (vault, kgateway, eso, sonarqube, kyverno) usan **multi-source**: el chart se descarga del repositorio oficial de Helm y los values se leen del repo Git (via referencia `$values`). No hay Chart.yaml wrappers en los directorios de componentes.
 
 ### Sync Waves
 
@@ -286,7 +317,16 @@ ArgoCD despliega los componentes en orden mediante sync waves:
 | -2 | SonarQube | Independiente, puede tardar en arrancar |
 | -1 | External Secrets | CRDs y operator antes del ClusterSecretStore |
 | 0 | ESO Config | Depende de Vault + ESO CRDs |
+| 0 | Kyverno Policies | Depende de Kyverno CRDs |
 | 1 | Routes | Depende de kgateway ready |
+
+### Post-instalación
+
+En modo GitOps, ArgoCD gestiona los componentes pero hay acciones que siempre se ejecutan imperativamente:
+
+- **Vault init/unseal**: Inicialización y desellado de Vault (no puede ser declarativo)
+- **Vault configuración**: KV v2, Kubernetes auth, policy y role para ESO
+- **Gateway NodePorts**: Parcheo del Service creado por el Gateway controller a NodePort 31080/31443
 
 ## Estructura del proyecto
 
@@ -301,7 +341,7 @@ autokube/
 │   ├── kind.sh                     # Ciclo de vida cluster Kind
 │   ├── ssl.sh                      # Generación CA + wildcard cert
 │   ├── helm.sh                     # Helpers Helm
-│   ├── argocd.sh                   # Bootstrap ArgoCD + GitOps
+│   ├── argocd.sh                   # Bootstrap ArgoCD + GitOps + Applications
 │   ├── vault.sh                    # Install, init, unseal, configurar
 │   ├── eso.sh                      # Install ESO + ClusterSecretStore
 │   ├── kgateway.sh                 # Install kgateway + Gateway + HTTPRoutes
@@ -311,6 +351,8 @@ autokube/
 ├── manifests/                      # Templates y values para instalación imperativa
 │   ├── kind-cluster.yaml.tpl
 │   ├── argocd/
+│   │   ├── values.yaml
+│   │   └── app-of-apps.yaml.tpl
 │   ├── vault/
 │   ├── eso/
 │   ├── kgateway/
@@ -319,8 +361,8 @@ autokube/
 │   └── kyverno/
 │       └── policies/
 ├── gitops/                         # Contenido para repo GitOps remoto
-│   ├── apps/
-│   └── components/
+│   ├── apps/                       # Helm chart app-of-apps
+│   └── components/                 # Values y manifests por componente
 ├── data/                           # Datos persistentes (gitignored)
 └── .gitignore
 ```
@@ -379,3 +421,7 @@ Esto instala la CA en el trust store del sistema. En Mac usa el Keychain; en Lin
 ./autokube up
 # Vault se inicializa con los datos existentes, solo necesita unseal
 ```
+
+### ArgoCD apps en OutOfSync
+
+Algunas apps (kyverno, routes) pueden mostrar OutOfSync en ArgoCD por diffs en CRDs grandes o campos defaulteados por controllers. Si las apps muestran **Healthy**, es normal y no requiere acción.
