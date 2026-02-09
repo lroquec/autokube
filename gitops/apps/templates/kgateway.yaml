@@ -10,7 +10,8 @@ metadata:
 spec:
   project: default
   sources:
-    - repoURL: cr.kgateway.dev/kgateway-dev/charts/kgateway
+    - repoURL: cr.kgateway.dev/kgateway-dev/charts
+      chart: kgateway
       targetRevision: "v2.2.0"
       helm:
         valueFiles:

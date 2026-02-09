@@ -310,6 +310,9 @@ REPOEOF
         log_warn "No se encontraron credenciales para ${CFG_GITOPS_REPO_URL}. Si es privado, falla."
     fi
 
+    # Registrar repos Helm necesarios (multi-source los necesita)
+    add_helm_repos_to_argocd
+
     log_success "Repositorio GitOps configurado"
 }
 
