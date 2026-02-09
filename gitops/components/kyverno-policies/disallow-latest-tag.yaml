@@ -10,7 +10,9 @@ metadata:
       Usar un tag específico garantiza reproducibilidad.
 spec:
   validationFailureAction: Audit
+  admission: true
   background: true
+  emitWarning: false
   rules:
     - name: disallow-latest-tag
       match:
@@ -18,7 +20,9 @@ spec:
           - resources:
               kinds:
                 - Pod
+      skipBackgroundRequests: true
       validate:
+        allowExistingViolations: true
         message: "El tag 'latest' no está permitido. Usa un tag específico."
         pattern:
           spec:

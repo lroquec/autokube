@@ -5,13 +5,22 @@ metadata:
   namespace: kgateway-system
 spec:
   parentRefs:
-    - name: main-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: main-gateway
       namespace: kgateway-system
       sectionName: https
   hostnames:
     - "argocd.127.0.0.1.nip.io"
   rules:
-    - backendRefs:
-        - name: argo-cd-argocd-server
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: argo-cd-argocd-server
           namespace: argocd
           port: 80
+          weight: 1

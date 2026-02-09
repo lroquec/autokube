@@ -10,7 +10,9 @@ metadata:
       Esto garantiza una correcta planificación de recursos en el cluster.
 spec:
   validationFailureAction: Audit
+  admission: true
   background: true
+  emitWarning: false
   rules:
     - name: require-requests-and-limits
       match:
@@ -18,7 +20,9 @@ spec:
           - resources:
               kinds:
                 - Pod
+      skipBackgroundRequests: true
       validate:
+        allowExistingViolations: true
         message: "Todos los containers deben tener resources.requests y resources.limits definidos."
         pattern:
           spec:

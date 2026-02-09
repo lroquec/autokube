@@ -5,13 +5,22 @@ metadata:
   namespace: kgateway-system
 spec:
   parentRefs:
-    - name: main-gateway
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: main-gateway
       namespace: kgateway-system
       sectionName: https
   hostnames:
     - "vault.127.0.0.1.nip.io"
   rules:
-    - backendRefs:
-        - name: vault
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: vault
           namespace: vault
           port: 8200
+          weight: 1
