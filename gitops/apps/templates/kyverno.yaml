@@ -27,7 +27,6 @@ spec:
       kind: CustomResourceDefinition
       jqPathExpressions:
         - .spec
-        - .metadata
   syncPolicy:
     automated:
       prune: true
