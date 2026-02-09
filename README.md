@@ -303,13 +303,48 @@ ARC necesita un Personal Access Token (PAT) de GitHub almacenado en Vault. Sin e
 
 El ExternalSecret (`arc-config`) sincroniza automáticamente este secreto de Vault al Secret de Kubernetes `github-arc-secret` que usa ARC.
 
-#### Uso en workflows
+#### Registrar repos
+
+Los runners se registran a **nivel de repositorio** (no de organización). Cada repo que necesite usar los runners debe estar configurado en `autokube.yaml`:
 
 ```yaml
-jobs:
-  build:
-    runs-on: arc-runner-set
+components:
+  arc:
+    repos:
+      - name: mi-repo
+        url: "https://github.com/mi-org/mi-repo"
+      - name: otro-repo
+        url: "https://github.com/mi-org/otro-repo"
 ```
+
+Tras añadir repos, ejecuta `./autokube up` para aplicar los cambios. Se crea un runner scale set por cada repo, todos compartiendo el mismo PAT y la misma etiqueta `arc-runner-set`.
+
+#### Usar los runners en otros repos
+
+Para usar los self-hosted runners en cualquier repo registrado:
+
+1. **Registrar el repo** en `autokube.yaml` (ver sección anterior) y ejecutar `./autokube up`
+
+2. **Tener el cluster arrancado** — los runners viven en tu cluster Kind local, si el cluster está parado no hay runners disponibles
+
+3. **Usar `runs-on: arc-runner-set`** en los workflows del repo:
+
+   ```yaml
+   name: CI
+   on: [push, pull_request]
+
+   jobs:
+     build:
+       runs-on: arc-runner-set
+       steps:
+         - uses: actions/checkout@v4
+         - name: Build
+           run: echo "Ejecutando en self-hosted runner"
+   ```
+
+   Esto es lo único que necesita el repo. No hace falta ninguna configuración adicional en GitHub ni en el repo destino.
+
+4. **Importante**: necesitas tener permisos de **admin** en el repo para que ARC pueda registrar el runner. Si no tienes permisos de admin, el runner no se registrará y los workflows quedarán en cola indefinidamente.
 
 ### ArgoCD
 
