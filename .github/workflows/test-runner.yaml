@@ -1,0 +1,14 @@
+name: Test ARC Runner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: arc-runner-set
+    steps:
+      - name: Test runner
+        run: |
+          echo "Runner funcionando correctamente"
+          echo "Hostname: $(hostname)"
+          echo "Fecha: $(date)"
