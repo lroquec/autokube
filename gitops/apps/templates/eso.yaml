@@ -15,7 +15,7 @@ spec:
       targetRevision: "0.15.1"
       helm:
         valueFiles:
-          - $values/components/eso/values.yaml
+          - $values/gitops/components/eso/values.yaml
     - repoURL: {{ .Values.global.repoURL | quote }}
       targetRevision: {{ .Values.global.targetRevision | quote }}
       ref: values

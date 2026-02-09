@@ -247,27 +247,68 @@ configure_argocd_repo() {
 
     log_step "Configurando repositorio GitOps en ArgoCD..."
 
-    local argocd_pass
-    argocd_pass=$(kubectl get secret argocd-initial-admin-secret -n "$ARGOCD_NAMESPACE" \
-        -o jsonpath='{.data.password}' | base64 -d)
+    local username=""
+    local password=""
 
-    local argocd_port
-    argocd_port=$(kubectl get svc argo-cd-argocd-server -n "$ARGOCD_NAMESPACE" \
-        -o jsonpath='{.spec.ports[?(@.name=="http")].port}')
+    # Extraer credenciales de ~/.git-credentials si el repo es HTTPS
+    if [[ "$CFG_GITOPS_REPO_URL" == https://* ]] && [ -f "$HOME/.git-credentials" ]; then
+        # Extraer el hostname del repo URL
+        local repo_host
+        repo_host=$(echo "$CFG_GITOPS_REPO_URL" | sed 's|https://||' | cut -d'/' -f1)
 
-    kubectl port-forward svc/argo-cd-argocd-server -n "$ARGOCD_NAMESPACE" 8090:"$argocd_port" &>/dev/null &
-    local pf_pid=$!
-    sleep 3
+        # Buscar credenciales para ese host en .git-credentials
+        local cred_line
+        cred_line=$(grep "https://.*@${repo_host}" "$HOME/.git-credentials" | head -1)
+        if [ -n "$cred_line" ]; then
+            # Formato: https://user:token@host
+            local userpass
+            userpass=$(echo "$cred_line" | sed "s|https://||" | sed "s|@${repo_host}.*||")
+            username=$(echo "$userpass" | cut -d':' -f1)
+            password=$(echo "$userpass" | cut -d':' -f2-)
+            log_info "Credenciales encontradas en ~/.git-credentials para ${repo_host}"
+        fi
+    fi
 
-    argocd login localhost:8090 \
-        --username admin \
-        --password "$argocd_pass" \
-        --insecure \
-        --grpc-web 2>/dev/null || true
+    # También aceptar credenciales via variables de entorno
+    if [ -n "${AUTOKUBE_GITOPS_USERNAME:-}" ]; then
+        username="$AUTOKUBE_GITOPS_USERNAME"
+    fi
+    if [ -n "${AUTOKUBE_GITOPS_TOKEN:-}" ]; then
+        password="$AUTOKUBE_GITOPS_TOKEN"
+    fi
 
-    argocd repo add "$CFG_GITOPS_REPO_URL" --insecure-skip-server-verification 2>/dev/null || true
-
-    kill $pf_pid 2>/dev/null || true
+    # Crear Secret de tipo repository en ArgoCD
+    if [ -n "$username" ] && [ -n "$password" ]; then
+        kubectl apply -f - <<REPOEOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-gitops
+  namespace: ${ARGOCD_NAMESPACE}
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: git
+  url: ${CFG_GITOPS_REPO_URL}
+  username: ${username}
+  password: ${password}
+REPOEOF
+    else
+        # Repo público o sin credenciales
+        kubectl apply -f - <<REPOEOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-gitops
+  namespace: ${ARGOCD_NAMESPACE}
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: git
+  url: ${CFG_GITOPS_REPO_URL}
+REPOEOF
+        log_warn "No se encontraron credenciales para ${CFG_GITOPS_REPO_URL}. Si es privado, falla."
+    fi
 
     log_success "Repositorio GitOps configurado"
 }

@@ -10,12 +10,12 @@ metadata:
 spec:
   project: default
   sources:
-    - repoURL: oci://cr.kgateway.dev/kgateway-dev/charts
+    - repoURL: cr.kgateway.dev/kgateway-dev/charts/kgateway
       chart: kgateway
       targetRevision: "v2.2.0"
       helm:
         valueFiles:
-          - $values/components/kgateway/values.yaml
+          - $values/gitops/components/kgateway/values.yaml
     - repoURL: {{ .Values.global.repoURL | quote }}
       targetRevision: {{ .Values.global.targetRevision | quote }}
       ref: values

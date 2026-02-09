@@ -15,7 +15,7 @@ spec:
       targetRevision: "2026.1.0"
       helm:
         valueFiles:
-          - $values/components/sonarqube/values.yaml
+          - $values/gitops/components/sonarqube/values.yaml
     - repoURL: {{ .Values.global.repoURL | quote }}
       targetRevision: {{ .Values.global.targetRevision | quote }}
       ref: values

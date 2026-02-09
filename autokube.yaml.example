@@ -28,7 +28,7 @@ gitops:
   # Branch o tag del repositorio
   targetRevision: "main"
   # Path dentro del repo donde están las Application CRs
-  path: "apps"
+  path: "gitops/apps"
 
 components:
   argocd:
