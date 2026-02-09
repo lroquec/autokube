@@ -11,7 +11,6 @@ spec:
   project: default
   sources:
     - repoURL: cr.kgateway.dev/kgateway-dev/charts/kgateway
-      chart: kgateway
       targetRevision: "v2.2.0"
       helm:
         valueFiles:
