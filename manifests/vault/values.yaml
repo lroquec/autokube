@@ -1,0 +1,58 @@
+# Vault Helm values
+# Chart: hashicorp/vault 0.32.0
+
+global:
+  enabled: true
+
+server:
+  enabled: true
+  image:
+    tag: "1.19.2"
+
+  standalone:
+    enabled: true
+    config: |
+      ui = true
+
+      listener "tcp" {
+        tls_disable = 1
+        address = "[::]:8200"
+        cluster_address = "[::]:8201"
+      }
+
+      storage "raft" {
+        path = "/vault/data"
+      }
+
+  dataStorage:
+    enabled: true
+    size: 1Gi
+    storageClass: null
+
+  # Usar hostPath montado por Kind
+  volumes:
+    - name: vault-data-host
+      hostPath:
+        path: /vault/data
+        type: DirectoryOrCreate
+
+  volumeMounts:
+    - name: vault-data-host
+      mountPath: /vault/data
+
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+  service:
+    type: ClusterIP
+
+ui:
+  enabled: true
+
+injector:
+  enabled: false

@@ -1,0 +1,18 @@
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayParameters
+metadata:
+  name: kgateway-params
+  namespace: kgateway-system
+spec:
+  kube:
+    service:
+      type: NodePort
+      ports:
+        - name: http
+          port: 8080
+          nodePort: 31080
+          protocol: TCP
+        - name: https
+          port: 8443
+          nodePort: 31443
+          protocol: TCP

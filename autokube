@@ -1,0 +1,348 @@
+#!/usr/bin/env bash
+# autokube - Instalador de entorno Kubernetes local para desarrollo
+#
+# Uso: ./autokube <comando> [opciones]
+#
+# Comandos:
+#   up        Levantar el cluster y todos los componentes
+#   down      Parar el cluster (preserva datos)
+#   destroy   Eliminar el cluster completamente
+#   status    Mostrar estado del cluster y servicios
+#   help      Mostrar esta ayuda
+
+set -euo pipefail
+
+AUTOKUBE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Cargar librerías
+source "${AUTOKUBE_ROOT}/lib/common.sh"
+source "${AUTOKUBE_ROOT}/lib/config.sh"
+source "${AUTOKUBE_ROOT}/lib/deps.sh"
+source "${AUTOKUBE_ROOT}/lib/kind.sh"
+source "${AUTOKUBE_ROOT}/lib/ssl.sh"
+source "${AUTOKUBE_ROOT}/lib/helm.sh"
+source "${AUTOKUBE_ROOT}/lib/networking.sh"
+source "${AUTOKUBE_ROOT}/lib/kgateway.sh"
+source "${AUTOKUBE_ROOT}/lib/vault.sh"
+source "${AUTOKUBE_ROOT}/lib/eso.sh"
+source "${AUTOKUBE_ROOT}/lib/sonarqube.sh"
+source "${AUTOKUBE_ROOT}/lib/kyverno.sh"
+source "${AUTOKUBE_ROOT}/lib/argocd.sh"
+
+trap cleanup_on_exit EXIT
+
+# ─── Comandos ───────────────────────────────────────────────
+
+cmd_up() {
+    log_header "Autokube UP"
+
+    # 1. Cargar config
+    load_config
+    print_config
+
+    # 2. Verificar/instalar dependencias
+    check_and_install_deps
+
+    # 3. Preparar directorios de datos
+    mkdir -p "${CFG_DATA_DIR}/vault/raft"
+    mkdir -p "${CFG_DATA_DIR}/sonarqube"
+    mkdir -p "${CFG_DATA_DIR}/kind/local-path"
+    mkdir -p "${CFG_DATA_DIR}/ssl"
+
+    # 4. Generar certificados SSL
+    if [ "$CFG_SSL_ENABLED" = "true" ]; then
+        generate_ssl_certs
+        if [ "$CFG_SSL_TRUST_CA" = "true" ]; then
+            trust_ca
+        fi
+    fi
+
+    # 5. Crear o arrancar cluster Kind
+    kind_up
+
+    # 6. Crear TLS secrets
+    if [ "$CFG_SSL_ENABLED" = "true" ]; then
+        create_tls_secrets
+    fi
+
+    # 7. Instalar componentes
+    if [ "$CFG_GITOPS_ENABLED" = "true" ] && [ "$CFG_COMP_ARGOCD" = "true" ]; then
+        # Modo GitOps: ArgoCD gestiona todo
+        install_argocd
+        configure_argocd_repo
+        apply_app_of_apps
+        wait_for_argocd_sync
+    else
+        # Modo imperativo: instalar cada componente con Helm
+        install_components_imperative
+    fi
+
+    # 8. Post-install (siempre imperativo)
+    post_install
+
+    # 9. Resumen
+    print_summary
+}
+
+install_components_imperative() {
+    log_header "Instalación imperativa de componentes"
+
+    if component_enabled kgateway; then
+        install_kgateway
+    fi
+
+    if component_enabled vault; then
+        install_vault_helm
+    fi
+
+    if component_enabled eso; then
+        install_eso
+    fi
+
+    if component_enabled sonarqube; then
+        install_sonarqube
+    fi
+
+    if component_enabled kyverno; then
+        install_kyverno
+    fi
+
+    if component_enabled argocd; then
+        install_argocd
+    fi
+}
+
+post_install() {
+    log_header "Post-instalación"
+
+    # Vault: init/unseal + configurar
+    if component_enabled vault; then
+        vault_post_install
+    fi
+
+    # ESO: ClusterSecretStore
+    if component_enabled eso && component_enabled vault; then
+        eso_post_install
+    fi
+
+    # kgateway: Gateway + HTTPRoutes
+    if component_enabled kgateway; then
+        kgateway_post_install
+    fi
+
+    # Kyverno: policies
+    if component_enabled kyverno; then
+        kyverno_post_install
+    fi
+}
+
+print_summary() {
+    log_header "Autokube está listo"
+
+    echo -e "${BOLD}URLs de acceso:${NC}"
+    if component_enabled argocd; then
+        echo -e "  ArgoCD:    ${CYAN}https://argocd.${CFG_BASE_DOMAIN}${NC}"
+    fi
+    if component_enabled vault; then
+        echo -e "  Vault:     ${CYAN}https://vault.${CFG_BASE_DOMAIN}${NC}"
+    fi
+    if component_enabled sonarqube; then
+        echo -e "  SonarQube: ${CYAN}https://sonarqube.${CFG_BASE_DOMAIN}${NC}"
+    fi
+
+    echo ""
+    echo -e "${BOLD}Credenciales:${NC}"
+    if component_enabled argocd; then
+        local argocd_pass
+        argocd_pass=$(kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "N/A")
+        echo -e "  ArgoCD:    admin / ${GREEN}${argocd_pass}${NC}"
+    fi
+    if component_enabled vault; then
+        if [ -f "${CFG_DATA_DIR}/vault/init.json" ]; then
+            local vault_token
+            vault_token=$(jq -r '.root_token' "${CFG_DATA_DIR}/vault/init.json" 2>/dev/null || echo "N/A")
+            echo -e "  Vault:     root token: ${GREEN}${vault_token}${NC}"
+        fi
+    fi
+    if component_enabled sonarqube; then
+        echo -e "  SonarQube: admin / ${GREEN}admin${NC}"
+    fi
+
+    echo ""
+    if [ "$CFG_SSL_ENABLED" = "true" ] && [ "$CFG_SSL_TRUST_CA" != "true" ]; then
+        log_warn "Los certificados son autofirmados. Acepta la excepción en el navegador o ejecuta:"
+        echo "  ./autokube trust-ca"
+    fi
+
+    echo ""
+    echo -e "  ${GREEN}kubectl cluster-info --context kind-${CFG_CLUSTER_NAME}${NC}"
+    echo ""
+}
+
+cmd_down() {
+    log_header "Autokube DOWN"
+    load_config
+    kind_down
+    log_success "Cluster parado. Los datos se preservan en ${CFG_DATA_DIR}/"
+    log_info "Ejecuta './autokube up' para reanudar."
+}
+
+cmd_destroy() {
+    load_config
+
+    local keep_data=false
+    for arg in "$@"; do
+        case "$arg" in
+            --keep-data) keep_data=true ;;
+        esac
+    done
+
+    log_header "Autokube DESTROY"
+    confirm_action "Esto eliminará el cluster '${CFG_CLUSTER_NAME}' completamente." || exit 0
+
+    kind_destroy
+
+    if [ "$keep_data" = "true" ]; then
+        log_info "Datos preservados en ${CFG_DATA_DIR}/"
+    else
+        if [ -d "${CFG_DATA_DIR}" ]; then
+            confirm_action "¿Eliminar también los datos persistentes en ${CFG_DATA_DIR}/?" && {
+                rm -rf "${CFG_DATA_DIR}"
+                log_info "Datos eliminados"
+            }
+        fi
+    fi
+
+    if [ "$CFG_SSL_TRUST_CA" = "true" ]; then
+        untrust_ca
+    fi
+
+    log_success "Cluster destruido."
+}
+
+cmd_status() {
+    load_config
+    log_header "Autokube STATUS"
+
+    # Estado del cluster
+    local container_name="${CFG_CLUSTER_NAME}-control-plane"
+    local container_state
+    container_state=$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || echo "not_found")
+
+    echo -e "${BOLD}Cluster:${NC}"
+    case "$container_state" in
+        running)
+            echo -e "  Estado: ${GREEN}Running${NC}"
+            echo -e "  Contexto: kind-${CFG_CLUSTER_NAME}"
+            ;;
+        exited)
+            echo -e "  Estado: ${YELLOW}Stopped${NC} (datos preservados)"
+            echo -e "  Ejecuta './autokube up' para reanudar"
+            return 0
+            ;;
+        *)
+            echo -e "  Estado: ${RED}No existe${NC}"
+            echo -e "  Ejecuta './autokube up' para crear"
+            return 0
+            ;;
+    esac
+
+    echo ""
+    echo -e "${BOLD}Componentes:${NC}"
+
+    # Verificar cada componente
+    local components=("argocd:argocd" "vault:vault" "eso:external-secrets" "kgateway:kgateway-system" "sonarqube:sonarqube" "kyverno:kyverno")
+    for comp_ns in "${components[@]}"; do
+        local comp="${comp_ns%%:*}"
+        local ns="${comp_ns##*:}"
+        if component_enabled "$comp"; then
+            local pods_ready pods_total
+            pods_total=$(kubectl get pods -n "$ns" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+            pods_ready=$(kubectl get pods -n "$ns" --no-headers 2>/dev/null | grep -c "Running" || echo "0")
+            if [ "$pods_total" -gt 0 ]; then
+                if [ "$pods_ready" = "$pods_total" ]; then
+                    echo -e "  ${comp}: ${GREEN}Ready${NC} (${pods_ready}/${pods_total} pods)"
+                else
+                    echo -e "  ${comp}: ${YELLOW}Parcial${NC} (${pods_ready}/${pods_total} pods running)"
+                fi
+            else
+                echo -e "  ${comp}: ${RED}No desplegado${NC}"
+            fi
+        fi
+    done
+
+    echo ""
+    echo -e "${BOLD}URLs:${NC}"
+    if component_enabled argocd; then
+        echo "  ArgoCD:    https://argocd.${CFG_BASE_DOMAIN}"
+    fi
+    if component_enabled vault; then
+        echo "  Vault:     https://vault.${CFG_BASE_DOMAIN}"
+    fi
+    if component_enabled sonarqube; then
+        echo "  SonarQube: https://sonarqube.${CFG_BASE_DOMAIN}"
+    fi
+
+    echo ""
+    echo -e "${BOLD}Credenciales:${NC}"
+    if component_enabled argocd; then
+        local argocd_pass
+        argocd_pass=$(kubectl get secret argocd-initial-admin-secret -n argocd -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "N/A")
+        echo "  ArgoCD:    admin / ${argocd_pass}"
+    fi
+    if component_enabled vault && [ -f "${CFG_DATA_DIR}/vault/init.json" ]; then
+        local vault_token
+        vault_token=$(jq -r '.root_token' "${CFG_DATA_DIR}/vault/init.json" 2>/dev/null || echo "N/A")
+        echo "  Vault:     root token: ${vault_token}"
+    fi
+    if component_enabled sonarqube; then
+        echo "  SonarQube: admin / admin"
+    fi
+    echo ""
+}
+
+cmd_trust_ca() {
+    load_config
+    trust_ca
+}
+
+cmd_help() {
+    echo "autokube - Entorno Kubernetes local para desarrollo"
+    echo ""
+    echo "Uso: ./autokube <comando> [opciones]"
+    echo ""
+    echo "Comandos:"
+    echo "  up             Levantar el cluster y todos los componentes"
+    echo "  down           Parar el cluster (preserva datos)"
+    echo "  destroy        Eliminar el cluster"
+    echo "    --keep-data  Preservar datos persistentes al destruir"
+    echo "  status         Mostrar estado del cluster y servicios"
+    echo "  trust-ca       Instalar CA en el trust store del sistema"
+    echo "  help           Mostrar esta ayuda"
+    echo ""
+    echo "Configuración: autokube.yaml (ver autokube.yaml.example)"
+    echo ""
+}
+
+# ─── Main ───────────────────────────────────────────────────
+
+main() {
+    local command="${1:-help}"
+    shift || true
+
+    case "$command" in
+        up)       cmd_up "$@" ;;
+        down)     cmd_down "$@" ;;
+        destroy)  cmd_destroy "$@" ;;
+        status)   cmd_status "$@" ;;
+        trust-ca) cmd_trust_ca "$@" ;;
+        help|--help|-h) cmd_help ;;
+        *)
+            log_error "Comando desconocido: $command"
+            cmd_help
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

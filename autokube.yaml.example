@@ -1,0 +1,50 @@
+# autokube.yaml - Configuración del entorno Kubernetes local
+#
+# Copia este fichero a autokube.yaml y personaliza según necesidades.
+# Los valores mostrados son los valores por defecto.
+
+cluster:
+  name: autokube
+
+network:
+  # Dominio base para acceso a servicios. Usa nip.io para resolución DNS automática.
+  baseDomain: "127.0.0.1.nip.io"
+  # Puertos del host mapeados al cluster. Requieren privilegios si < 1024.
+  httpPort: 80
+  httpsPort: 443
+
+ssl:
+  # Generar certificados autofirmados para HTTPS
+  enabled: true
+  # Instalar la CA en el trust store del sistema (requiere sudo)
+  trustCA: false
+
+gitops:
+  # Si true, ArgoCD gestiona los componentes desde un repo Git remoto.
+  # Si false, los componentes se instalan imperativamente con Helm.
+  enabled: true
+  # URL del repositorio Git con la estructura gitops/ (REQUERIDO si gitops.enabled)
+  repoURL: ""
+  # Branch o tag del repositorio
+  targetRevision: "main"
+  # Path dentro del repo donde están las Application CRs
+  path: "apps"
+
+components:
+  argocd:
+    enabled: true
+  vault:
+    enabled: true
+  eso:
+    enabled: true
+  kgateway:
+    enabled: true
+  sonarqube:
+    enabled: true
+  kyverno:
+    enabled: true
+
+persistence:
+  # Directorio para datos persistentes (Vault, SonarQube, PVs).
+  # Paths relativos se resuelven respecto al directorio de autokube.
+  dataDir: "./data"

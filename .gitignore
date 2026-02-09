@@ -1,0 +1,16 @@
+# Persistent data
+data/
+
+# Generated configs
+autokube.yaml
+
+# OS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace

@@ -1,0 +1,65 @@
+# ArgoCD Helm values
+# Chart: argo/argo-cd
+
+## Server
+server:
+  service:
+    type: ClusterIP
+  extraArgs:
+    - --insecure  # TLS terminado en kgateway
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+## Repo Server
+repoServer:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+## Application Controller
+controller:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+## Redis
+redis:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+## Notifications (disabled for local dev)
+notifications:
+  enabled: false
+
+## ApplicationSet controller
+applicationSet:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+## Configs
+configs:
+  params:
+    server.insecure: true
