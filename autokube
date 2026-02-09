@@ -28,6 +28,8 @@ source "${AUTOKUBE_ROOT}/lib/eso.sh"
 source "${AUTOKUBE_ROOT}/lib/sonarqube.sh"
 source "${AUTOKUBE_ROOT}/lib/kyverno.sh"
 source "${AUTOKUBE_ROOT}/lib/argocd.sh"
+source "${AUTOKUBE_ROOT}/lib/external.sh"
+source "${AUTOKUBE_ROOT}/lib/metallb.sh"
 
 trap cleanup_on_exit EXIT
 
@@ -44,10 +46,14 @@ cmd_up() {
     check_and_install_deps
 
     # 3. Preparar directorios de datos
-    mkdir -p "${CFG_DATA_DIR}/vault/raft"
-    mkdir -p "${CFG_DATA_DIR}/sonarqube"
-    mkdir -p "${CFG_DATA_DIR}/kind/local-path"
     mkdir -p "${CFG_DATA_DIR}/ssl"
+    if is_kind_cluster; then
+        mkdir -p "${CFG_DATA_DIR}/vault/raft"
+        mkdir -p "${CFG_DATA_DIR}/sonarqube"
+        mkdir -p "${CFG_DATA_DIR}/kind/local-path"
+    else
+        mkdir -p "${CFG_DATA_DIR}/vault"
+    fi
 
     # 4. Generar certificados SSL
     if [ "$CFG_SSL_ENABLED" = "true" ]; then
@@ -57,22 +63,35 @@ cmd_up() {
         fi
     fi
 
-    # 5. Crear o arrancar cluster Kind
-    kind_up
+    # 5. Crear o arrancar cluster
+    if is_kind_cluster; then
+        kind_up
+    else
+        external_cluster_connect
+    fi
 
     # 6. Crear TLS secrets
     if [ "$CFG_SSL_ENABLED" = "true" ]; then
         create_tls_secrets
     fi
 
-    # 7. Preparar nodo Kind (sysctl para SonarQube, Gateway API CRDs)
+    # 7. Preparar nodo (sysctl para SonarQube, Gateway API CRDs)
     if component_enabled sonarqube; then
-        log_info "Configurando vm.max_map_count para SonarQube..."
-        docker exec "${CFG_CLUSTER_NAME}-control-plane" sysctl -w vm.max_map_count=524288 >/dev/null 2>&1 || true
-        docker exec "${CFG_CLUSTER_NAME}-control-plane" sysctl -w fs.file-max=131072 >/dev/null 2>&1 || true
+        if is_kind_cluster; then
+            log_info "Configurando vm.max_map_count para SonarQube..."
+            docker exec "${CFG_CLUSTER_NAME}-control-plane" sysctl -w vm.max_map_count=524288 >/dev/null 2>&1 || true
+            docker exec "${CFG_CLUSTER_NAME}-control-plane" sysctl -w fs.file-max=131072 >/dev/null 2>&1 || true
+        else
+            log_warn "Cluster externo: asegúrate de que vm.max_map_count >= 524288 en los nodos"
+        fi
     fi
     if component_enabled kgateway; then
         install_gateway_api_crds
+    fi
+
+    # 7b. Instalar MetalLB si está habilitado (antes de kgateway para que LoadBalancer funcione)
+    if component_enabled metallb; then
+        install_metallb
     fi
 
     # 8. Instalar ArgoCD (siempre imperativo, no puede gestionarse a sí mismo)
@@ -136,8 +155,8 @@ post_install() {
 
     # En modo GitOps remoto, ArgoCD gestiona routes, eso-config y kyverno-policies
     if [ "$CFG_GITOPS_ENABLED" = "true" ] && [ -n "$CFG_GITOPS_REPO_URL" ]; then
-        # Solo parchear NodePorts (el Gateway y rutas los gestiona ArgoCD)
-        if component_enabled kgateway; then
+        # Solo parchear NodePorts en Kind (el Gateway y rutas los gestiona ArgoCD)
+        if component_enabled kgateway && is_kind_cluster; then
             kgateway_patch_nodeports
         fi
     else
@@ -195,16 +214,26 @@ print_summary() {
     fi
 
     echo ""
-    echo -e "  ${GREEN}kubectl cluster-info --context kind-${CFG_CLUSTER_NAME}${NC}"
+    if is_kind_cluster; then
+        echo -e "  ${GREEN}kubectl cluster-info --context kind-${CFG_CLUSTER_NAME}${NC}"
+    else
+        local ctx="${CFG_CLUSTER_CONTEXT:-$(kubectl config current-context 2>/dev/null || echo 'current')}"
+        echo -e "  ${GREEN}kubectl cluster-info --context ${ctx}${NC}"
+    fi
     echo ""
 }
 
 cmd_down() {
     log_header "Autokube DOWN"
     load_config
-    kind_down
-    log_success "Cluster parado. Los datos se preservan en ${CFG_DATA_DIR}/"
-    log_info "Ejecuta './autokube up' para reanudar."
+
+    if is_kind_cluster; then
+        kind_down
+        log_success "Cluster parado. Los datos se preservan en ${CFG_DATA_DIR}/"
+        log_info "Ejecuta './autokube up' para reanudar."
+    else
+        log_warn "El cluster externo no se gestiona por autokube. Usa kubectl o tu herramienta de cluster."
+    fi
 }
 
 cmd_destroy() {
@@ -218,9 +247,14 @@ cmd_destroy() {
     done
 
     log_header "Autokube DESTROY"
-    confirm_action "Esto eliminará el cluster '${CFG_CLUSTER_NAME}' completamente." || exit 0
 
-    kind_destroy
+    if is_kind_cluster; then
+        confirm_action "Esto eliminará el cluster Kind '${CFG_CLUSTER_NAME}' completamente." || exit 0
+        kind_destroy
+    else
+        confirm_action "Esto desinstalará todos los componentes de Autokube del cluster externo." || exit 0
+        uninstall_components
+    fi
 
     if [ "$keep_data" = "true" ]; then
         log_info "Datos preservados en ${CFG_DATA_DIR}/"
@@ -245,33 +279,45 @@ cmd_status() {
     log_header "Autokube STATUS"
 
     # Estado del cluster
-    local container_name="${CFG_CLUSTER_NAME}-control-plane"
-    local container_state
-    container_state=$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || echo "not_found")
-
     echo -e "${BOLD}Cluster:${NC}"
-    case "$container_state" in
-        running)
-            echo -e "  Estado: ${GREEN}Running${NC}"
-            echo -e "  Contexto: kind-${CFG_CLUSTER_NAME}"
-            ;;
-        exited)
-            echo -e "  Estado: ${YELLOW}Stopped${NC} (datos preservados)"
-            echo -e "  Ejecuta './autokube up' para reanudar"
+    if is_kind_cluster; then
+        local container_name="${CFG_CLUSTER_NAME}-control-plane"
+        local container_state
+        container_state=$(docker inspect -f '{{.State.Status}}' "$container_name" 2>/dev/null || echo "not_found")
+
+        case "$container_state" in
+            running)
+                echo -e "  Estado: ${GREEN}Running${NC} (Kind)"
+                echo -e "  Contexto: kind-${CFG_CLUSTER_NAME}"
+                ;;
+            exited)
+                echo -e "  Estado: ${YELLOW}Stopped${NC} (datos preservados)"
+                echo -e "  Ejecuta './autokube up' para reanudar"
+                return 0
+                ;;
+            *)
+                echo -e "  Estado: ${RED}No existe${NC}"
+                echo -e "  Ejecuta './autokube up' para crear"
+                return 0
+                ;;
+        esac
+    else
+        local ctx="${CFG_CLUSTER_CONTEXT:-$(kubectl config current-context 2>/dev/null || echo 'N/A')}"
+        if kubectl cluster-info &>/dev/null; then
+            echo -e "  Estado: ${GREEN}Conectado${NC} (externo)"
+            echo -e "  Contexto: $ctx"
+        else
+            echo -e "  Estado: ${RED}No accesible${NC}"
+            echo -e "  Contexto: $ctx"
             return 0
-            ;;
-        *)
-            echo -e "  Estado: ${RED}No existe${NC}"
-            echo -e "  Ejecuta './autokube up' para crear"
-            return 0
-            ;;
-    esac
+        fi
+    fi
 
     echo ""
     echo -e "${BOLD}Componentes:${NC}"
 
     # Verificar cada componente
-    local components=("argocd:argocd" "vault:vault" "eso:external-secrets" "kgateway:kgateway-system" "sonarqube:sonarqube" "kyverno:kyverno")
+    local components=("argocd:argocd" "vault:vault" "eso:external-secrets" "kgateway:kgateway-system" "sonarqube:sonarqube" "kyverno:kyverno" "metallb:metallb-system")
     for comp_ns in "${components[@]}"; do
         local comp="${comp_ns%%:*}"
         local ns="${comp_ns##*:}"

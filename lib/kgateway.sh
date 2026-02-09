@@ -72,8 +72,10 @@ kgateway_post_install() {
         "BASE_DOMAIN" "$CFG_BASE_DOMAIN"
     kubectl apply -f "$gateway_file"
 
-    # Parchear NodePorts
-    kgateway_patch_nodeports
+    # Parchear NodePorts solo en Kind
+    if is_kind_cluster; then
+        kgateway_patch_nodeports
+    fi
 
     # Crear ReferenceGrants y HTTPRoutes para cada componente habilitado
     if component_enabled argocd; then

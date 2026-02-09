@@ -1,31 +1,28 @@
+{{- if eq .Values.global.clusterType "external" }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: vault
+  name: metallb
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "-3"
+    argocd.argoproj.io/sync-wave: "-4"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   sources:
-    - repoURL: https://helm.releases.hashicorp.com
-      chart: vault
-      targetRevision: "0.32.0"
+    - repoURL: https://metallb.github.io/metallb
+      chart: metallb
+      targetRevision: "0.14.9"
       helm:
         valueFiles:
-          {{- if eq .Values.global.clusterType "external" }}
-          - $values/gitops/components/vault/values-external.yaml
-          {{- else }}
-          - $values/gitops/components/vault/values.yaml
-          {{- end }}
+          - $values/gitops/components/metallb/values.yaml
     - repoURL: {{ .Values.global.repoURL | quote }}
       targetRevision: {{ .Values.global.targetRevision | quote }}
       ref: values
   destination:
     server: https://kubernetes.default.svc
-    namespace: vault
+    namespace: metallb-system
   syncPolicy:
     automated:
       prune: true
@@ -33,3 +30,4 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
+{{- end }}

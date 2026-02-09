@@ -15,7 +15,11 @@ spec:
       targetRevision: "2026.1.0"
       helm:
         valueFiles:
+          {{- if eq .Values.global.clusterType "external" }}
+          - $values/gitops/components/sonarqube/values-external.yaml
+          {{- else }}
           - $values/gitops/components/sonarqube/values.yaml
+          {{- end }}
     - repoURL: {{ .Values.global.repoURL | quote }}
       targetRevision: {{ .Values.global.targetRevision | quote }}
       ref: values

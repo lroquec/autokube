@@ -12,11 +12,14 @@ install_vault_helm() {
 
     ensure_namespace "$VAULT_NAMESPACE"
 
+    local values_file="${AUTOKUBE_ROOT}/manifests/vault/values.yaml"
+    is_kind_cluster || values_file="${AUTOKUBE_ROOT}/manifests/vault/values-external.yaml"
+
     log_step "Instalando Vault ${VAULT_CHART_VERSION}..."
     helm upgrade --install vault hashicorp/vault \
         --version "$VAULT_CHART_VERSION" \
         --namespace "$VAULT_NAMESPACE" \
-        --values "${AUTOKUBE_ROOT}/manifests/vault/values.yaml" \
+        --values "$values_file" \
         --timeout 5m
 
     # Vault no pasa --wait porque arranca en sealed state

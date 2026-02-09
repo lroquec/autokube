@@ -22,6 +22,10 @@ CFG_COMP_ESO="true"
 CFG_COMP_KGATEWAY="true"
 CFG_COMP_SONARQUBE="true"
 CFG_COMP_KYVERNO="true"
+CFG_COMP_METALLB="false"
+CFG_CLUSTER_CREATE="true"
+CFG_CLUSTER_CONTEXT=""
+CFG_METALLB_ADDRESS_RANGE=""
 CFG_DATA_DIR="${AUTOKUBE_ROOT}/data"
 
 # Helper para leer un valor del YAML (devuelve default si no existe o es null)
@@ -61,6 +65,10 @@ load_config() {
         CFG_COMP_KGATEWAY=$(cfg_read '.components.kgateway.enabled' "$CFG_COMP_KGATEWAY")
         CFG_COMP_SONARQUBE=$(cfg_read '.components.sonarqube.enabled' "$CFG_COMP_SONARQUBE")
         CFG_COMP_KYVERNO=$(cfg_read '.components.kyverno.enabled' "$CFG_COMP_KYVERNO")
+        CFG_COMP_METALLB=$(cfg_read '.components.metallb.enabled' "$CFG_COMP_METALLB")
+        CFG_CLUSTER_CREATE=$(cfg_read '.cluster.create' "$CFG_CLUSTER_CREATE")
+        CFG_CLUSTER_CONTEXT=$(cfg_read '.cluster.context' "$CFG_CLUSTER_CONTEXT")
+        CFG_METALLB_ADDRESS_RANGE=$(cfg_read '.components.metallb.addressRange' "$CFG_METALLB_ADDRESS_RANGE")
 
         local data_dir
         data_dir=$(cfg_read '.persistence.dataDir' "./data")
@@ -78,6 +86,11 @@ load_config() {
         CFG_GITOPS_ENABLED="false"
     fi
 
+    if [ "$CFG_COMP_METALLB" = "true" ] && [ -z "$CFG_METALLB_ADDRESS_RANGE" ]; then
+        log_error "MetalLB habilitado pero components.metallb.addressRange no configurado."
+        exit 1
+    fi
+
     log_success "Configuración cargada (cluster: $CFG_CLUSTER_NAME, dominio: $CFG_BASE_DOMAIN)"
 }
 
@@ -91,14 +104,23 @@ component_enabled() {
         kgateway)  [ "$CFG_COMP_KGATEWAY" = "true" ] ;;
         sonarqube) [ "$CFG_COMP_SONARQUBE" = "true" ] ;;
         kyverno)   [ "$CFG_COMP_KYVERNO" = "true" ] ;;
+        metallb)   [ "$CFG_COMP_METALLB" = "true" ] ;;
         *) return 1 ;;
     esac
 }
 
+# Verificar si estamos usando un cluster Kind (vs cluster externo)
+is_kind_cluster() { [ "$CFG_CLUSTER_CREATE" = "true" ]; }
+
 # Mostrar configuración actual
 print_config() {
     log_header "Configuración"
-    echo "  Cluster:     $CFG_CLUSTER_NAME"
+    if is_kind_cluster; then
+        echo "  Cluster:     $CFG_CLUSTER_NAME (Kind)"
+    else
+        local ctx="${CFG_CLUSTER_CONTEXT:-$(kubectl config current-context 2>/dev/null || echo 'N/A')}"
+        echo "  Cluster:     externo (contexto: $ctx)"
+    fi
     echo "  Dominio:     $CFG_BASE_DOMAIN"
     echo "  Puertos:     HTTP=$CFG_HTTP_PORT HTTPS=$CFG_HTTPS_PORT"
     echo "  SSL:         $CFG_SSL_ENABLED (trust CA: $CFG_SSL_TRUST_CA)"
@@ -108,6 +130,9 @@ print_config() {
     fi
     echo "  Componentes: argocd=$CFG_COMP_ARGOCD vault=$CFG_COMP_VAULT eso=$CFG_COMP_ESO"
     echo "               kgateway=$CFG_COMP_KGATEWAY sonarqube=$CFG_COMP_SONARQUBE kyverno=$CFG_COMP_KYVERNO"
+    if [ "$CFG_COMP_METALLB" = "true" ]; then
+        echo "               metallb=$CFG_COMP_METALLB (rango: $CFG_METALLB_ADDRESS_RANGE)"
+    fi
     echo "  Data dir:    $CFG_DATA_DIR"
     echo ""
 }

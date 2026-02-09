@@ -1,3 +1,4 @@
 global:
   repoURL: ""
   targetRevision: "main"
+  clusterType: "kind"

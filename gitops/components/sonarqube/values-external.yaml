@@ -1,0 +1,44 @@
+# SonarQube Community Helm values para cluster externo
+# Sin initSysctl/initFs privileged
+
+community:
+  enabled: true
+
+monitoringPasscode: "autokube"
+
+service:
+  type: ClusterIP
+  internalPort: 9000
+
+persistence:
+  enabled: true
+  size: 5Gi
+
+resources:
+  requests:
+    cpu: 400m
+    memory: 2Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+postgresql:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+initSysctl:
+  enabled: false
+
+initFs:
+  enabled: true
+  securityContext:
+    privileged: false

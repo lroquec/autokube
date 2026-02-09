@@ -5,6 +5,11 @@
 
 cluster:
   name: autokube
+  # Si false, autokube no crea cluster Kind y usa un cluster Kubernetes existente.
+  create: true
+  # Contexto de kubeconfig para el cluster externo (solo si create: false).
+  # Si vacío, usa el contexto actual (kubectl config current-context).
+  context: ""
 
 network:
   # Dominio base para acceso a servicios. Usa nip.io para resolución DNS automática.
@@ -43,6 +48,13 @@ components:
     enabled: true
   kyverno:
     enabled: true
+  metallb:
+    # LoadBalancer para clusters sin cloud provider (bare-metal/VMs).
+    # No es necesario en Kind (usa NodePort).
+    enabled: false
+    # Rango de IPs para asignar a Services LoadBalancer (REQUERIDO si enabled).
+    # Ejemplo: "192.168.1.240-192.168.1.250"
+    addressRange: ""
 
 persistence:
   # Directorio para datos persistentes (Vault, SonarQube, PVs).

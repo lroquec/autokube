@@ -178,16 +178,19 @@ check_and_install_deps() {
         export PATH="${HOME}/.local/bin:$PATH"
     fi
 
-    # Docker es requisito previo obligatorio
-    check_docker || exit 1
-
     local tools_to_install=()
 
-    # Verificar cada herramienta
-    if check_tool kind; then
-        log_success "kind OK ($(kind version 2>/dev/null || echo 'installed'))"
+    # Docker y Kind solo son necesarios para clusters Kind
+    if is_kind_cluster; then
+        check_docker || exit 1
+
+        if check_tool kind; then
+            log_success "kind OK ($(kind version 2>/dev/null || echo 'installed'))"
+        else
+            tools_to_install+=(kind)
+        fi
     else
-        tools_to_install+=(kind)
+        log_info "Cluster externo: Docker y Kind no son necesarios"
     fi
 
     if check_tool kubectl; then

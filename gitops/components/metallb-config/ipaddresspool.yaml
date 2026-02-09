@@ -1,0 +1,9 @@
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: autokube-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    # Edita este rango con las IPs disponibles en tu red
+    - 192.168.1.240-192.168.1.250

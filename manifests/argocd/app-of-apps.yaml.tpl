@@ -17,6 +17,8 @@ spec:
           value: __GITOPS_REPO_URL__
         - name: global.targetRevision
           value: __GITOPS_TARGET_REVISION__
+        - name: global.clusterType
+          value: __CLUSTER_TYPE__
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd

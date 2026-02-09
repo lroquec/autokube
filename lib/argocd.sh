@@ -80,6 +80,15 @@ create_argocd_applications() {
     # Añadir repos Helm necesarios para que ArgoCD los resuelva
     add_helm_repos_to_argocd
 
+    if component_enabled metallb; then
+        create_argocd_app "metallb" "metallb" \
+            "https://metallb.github.io/metallb" \
+            "${METALLB_CHART_VERSION}" \
+            "metallb-system" \
+            "${AUTOKUBE_ROOT}/manifests/metallb/values.yaml" \
+            "-4"
+    fi
+
     if component_enabled kgateway; then
         create_argocd_app "kgateway" "kgateway" \
             "oci://cr.kgateway.dev/kgateway-dev/charts" \
@@ -90,11 +99,13 @@ create_argocd_applications() {
     fi
 
     if component_enabled vault; then
+        local vault_values="${AUTOKUBE_ROOT}/manifests/vault/values.yaml"
+        is_kind_cluster || vault_values="${AUTOKUBE_ROOT}/manifests/vault/values-external.yaml"
         create_argocd_app "vault" "vault" \
             "https://helm.releases.hashicorp.com" \
             "${VAULT_CHART_VERSION}" \
             "vault" \
-            "${AUTOKUBE_ROOT}/manifests/vault/values.yaml" \
+            "$vault_values" \
             "-3"
     fi
 
@@ -108,11 +119,13 @@ create_argocd_applications() {
     fi
 
     if component_enabled sonarqube; then
+        local sq_values="${AUTOKUBE_ROOT}/manifests/sonarqube/values.yaml"
+        is_kind_cluster || sq_values="${AUTOKUBE_ROOT}/manifests/sonarqube/values-external.yaml"
         create_argocd_app "sonarqube" "sonarqube" \
             "https://SonarSource.github.io/helm-chart-sonarqube" \
             "${SONARQUBE_CHART_VERSION}" \
             "sonarqube" \
-            "${AUTOKUBE_ROOT}/manifests/sonarqube/values.yaml" \
+            "$sq_values" \
             "-2"
     fi
 
@@ -150,6 +163,9 @@ add_helm_repos_to_argocd() {
     fi
     if component_enabled kgateway; then
         repos=$(echo "$repos" | jq '. + [{"type":"helm","name":"kgateway","url":"cr.kgateway.dev/kgateway-dev/charts","enableOCI":"true"}]')
+    fi
+    if component_enabled metallb; then
+        repos=$(echo "$repos" | jq '. + [{"type":"helm","name":"metallb","url":"https://metallb.github.io/metallb"}]')
     fi
 
     # Parchear el configmap de argocd-cm con los repos
@@ -324,13 +340,17 @@ apply_app_of_apps() {
 
     log_step "Aplicando app-of-apps..."
 
+    local cluster_type="kind"
+    is_kind_cluster || cluster_type="external"
+
     local app_file="${CFG_DATA_DIR}/app-of-apps.yaml"
     render_template \
         "${AUTOKUBE_ROOT}/manifests/argocd/app-of-apps.yaml.tpl" \
         "$app_file" \
         "GITOPS_REPO_URL" "$CFG_GITOPS_REPO_URL" \
         "GITOPS_TARGET_REVISION" "$CFG_GITOPS_TARGET_REVISION" \
-        "GITOPS_PATH" "$CFG_GITOPS_PATH"
+        "GITOPS_PATH" "$CFG_GITOPS_PATH" \
+        "CLUSTER_TYPE" "$cluster_type"
 
     kubectl apply -f "$app_file"
 
