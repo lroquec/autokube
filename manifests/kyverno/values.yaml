@@ -1,6 +1,13 @@
 # Kyverno Helm values
 # Chart: kyverno/kyverno
 
+# Usar Ignore en lugar de Fail para los webhooks.
+# Como las políticas son solo Audit, no tiene sentido bloquear
+# todo el cluster si Kyverno está caído o reiniciándose.
+features:
+  forceFailurePolicyIgnore:
+    enabled: true
+
 admissionController:
   replicas: 1
   resources:
